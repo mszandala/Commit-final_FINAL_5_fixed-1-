@@ -46,6 +46,9 @@ class ChatResponse(ApiModel):
     text: Optional[str] = Field(description="Odpowiedź dla użytkownika; null, gdy tura została zablokowana")
     tools: list[ToolCall]
     verdict: Optional[Verdict] = Field(description="Najważniejsza decyzja tury; null, gdy nic nie zadziałało")
+    verdicts: list[Verdict] = Field(description="Wszystkie decyzje tury, od najważniejszej (np. redact i warn naraz)")
+    masked_for_model: list[str] = Field(
+        description="Typy danych z promptu ukryte przed chatbotem; użytkownik i tak widzi swoje wartości")
     tokens: int
     latency_ms: int
     budget: Budget
@@ -116,6 +119,7 @@ class Meta(ApiModel):
     pii_tags: list[str] = Field(description="Typy PII ustawiane per rola")
     redacted_pii: list[str] = Field(description="Typy zawsze ukrywane, niezależnie od roli")
     blocked_pii: list[str] = Field(description="Typy zawsze blokujące odpowiedź")
+    pii_labels: dict[str, str] = Field(description="Typ ze znacznika [TYP] w tekście -> nazwa dla ludzi")
     controls: dict[str, str] = Field(description="Etap kontroli -> nazwa dla ludzi")
     stages: dict[str, str] = Field(description="Etap tury (zdarzenie stage w strumieniu) -> nazwa dla ludzi")
     examples: list[str]
@@ -123,7 +127,7 @@ class Meta(ApiModel):
 
 # --- log -------------------------------------------------------------------------------------
 
-EventDecision = Literal["Allowed", "Redacted", "Blocked"]
+EventDecision = Literal["Allowed", "Redacted", "Blocked", "Error"]
 
 
 class Event(ApiModel):
@@ -137,6 +141,8 @@ class Event(ApiModel):
     stage: Optional[str] = Field(description="Etap, który zdecydował; null dla zwykłej tury")
     control: str = Field(description="Nazwa etapu dla ludzi; pusta dla zwykłej tury")
     reason: str
+    masked_for_model: list[str] = Field(description="Typy danych z promptu ukryte przed chatbotem")
+    model: Optional[str] = Field(description="Model chatbota w tej turze; null, gdy nie był wołany")
     tokens: int
     latency_ms: int
 

@@ -86,6 +86,8 @@ class TurnResult:
     tokens: int = 0                 # tokeny zużyte przez wszystkie wywołania modelu w turze
     latency_ms: int = 0
     error: Optional[str] = None     # błąd wywołania modelu (tura nie dała odpowiedzi)
+    verdicts: list = field(default_factory=list)          # wszystkie decyzje tury, od najważniejszej
+    masked_for_model: list = field(default_factory=list)  # typy z promptu ukryte przed chatbotem
 
 
 # Etapy tury zgłaszane przez on_progress.
@@ -169,9 +171,9 @@ class SecureToolGate:
         self.whitelist = ToolGate(conv.role)
         self.on_progress = on_progress
 
-    def _report(self, name: str) -> None:
+    def _report(self, call: dict) -> None:
         if self.on_progress:
-            self.on_progress("tool", self.calls[-1])
+            self.on_progress("tool", call)
             self.on_progress("stage", {"stage": STAGE_MODEL})
 
     @property
@@ -180,9 +182,11 @@ class SecureToolGate:
 
     def __call__(self, name: str, args: dict) -> Optional[str]:
         refusal = self.whitelist(name, args)
+        # Subagent dopisuje własne wywołania do `calls`, zanim to się skończy — trzymamy własny wpis.
+        call = self.calls[-1]
         if refusal is not None:
             audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist")
-            self._report(name)
+            self._report(call)
             return refusal
 
         # Kod do uruchomienia sprawdzamy tu, żeby odrzucenie było widoczne jako decyzja warstwy
@@ -190,10 +194,10 @@ class SecureToolGate:
         if name == "run_python":
             verdict = check_code(str(args.get("code", "")))
             if verdict.is_blocked:
-                self.calls[-1].update(allowed=False, stage="code_guard", reason=verdict.reason)
+                call.update(allowed=False, stage="code_guard", reason=verdict.reason)
                 audit.record("tool_call", "security", tool=name, allowed=False, args=args,
                              stage="code_guard", reason=verdict.reason)
-                self._report(name)
+                self._report(call)
                 return f"Code rejected by security policy: {verdict.reason}"
 
         # Narzędzia działają lokalnie na prawdziwych wartościach. Wyjątek: subagent, którego
@@ -206,7 +210,7 @@ class SecureToolGate:
             self.conv.public_texts.append(masked)
         audit.record("tool_call", "local" if local else "chatbot", tool=name, allowed=True, args=args,
                      scan=scan, masked=stats, result_chars=len(masked))
-        self._report(name)
+        self._report(call)
         return masked
 
     def _mask_result(self, name: str, result: str) -> tuple[str, str, dict]:
@@ -328,8 +332,14 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
                      reply=logged_reply, leaks_to_chatbot=leaks, vault_size=len(conv.vault),
                      tokens=tokens, latency_ms=latency)
         audit.flush(events, conversation=conv.id, role=conv.role, turn=conv.turns)
+        # Ostrzeżenie strażnika zostaje obok decyzji innego etapu (np. redact), zamiast przez nią znikać.
+        verdicts = [verdict] if verdict else []
+        if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
+            verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)})
+        masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
         return TurnResult(reply, blocked, reason, guard, masked_prompt, list(entities), gate.calls,
-                          output, leaks, events, verdict, tokens, latency, error)
+                          output, leaks, events, verdict, tokens, latency, error,
+                          verdicts=verdicts, masked_for_model=masked)
 
     def block(stage_name, reason):
         return {"decision": "block", "stage": stage_name, "reason": reason}
