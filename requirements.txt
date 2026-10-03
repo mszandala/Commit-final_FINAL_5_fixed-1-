@@ -1,0 +1,20 @@
+chromadb==1.5.9
+sentence-transformers==6.1.0
+torch==2.14.1
+# gliner 0.2.29 (PII detector) needs transformers < 5.17
+transformers==5.16.1
+scikit-learn==1.9.1
+kubernetes==36.0.3
+onnxruntime==1.30.0
+uvicorn==0.54.0
+python-dotenv==1.2.4
+# API, model clients, PII detector, chat_testing.py and tests
+fastapi==0.119.0
+openai==3.24.0
+ollama==0.6.3
+gliner==0.2.29
+protobuf==7.36.2
+requests==2.34.2
+PyYAML==6.0.3
+pytest==9.1.1
+httpx==0.28.1

@@ -1,0 +1,230 @@
+# Reguły modułu "Dokumenty i regulaminy firmowe" (fikcyjna firma HackYeah2026).
+#
+# Format: bloki "Klucz: wartość" oddzielone pustą linią, jak w security/rules.txt.
+# Pierwszy blok to nagłówek polityki, każdy kolejny to jedna reguła zaczynająca się od "Rule:".
+# Listy rozdziela się przecinkami; "Regex:" można powtarzać (jeden wzorzec na linię).
+# Source wskazuje dokument w data/company_documents/, Fingerprint - plik w data/company_fixtures/.
+# Linie zaczynające się od "#" są komentarzami.
+#
+# Plik jest przeładowywany (bez restartu), gdy zmieni się jego treść; zmiany są sprawdzane co
+# COMPANY_POLICIES_RELOAD_INTERVAL sekund (domyślnie 1 s).
+# Błędny plik nie wyłącza ochrony: zostaje ostatnia poprawna wersja, a błąd trafia do audytu.
+#
+# Allowed Roles: istniejące role z config.ROLES (aliasy jak w prompt_guard), "*" = wszystkie, "none" = nikt.
+# On Violation: block | redact | warn | log_only
+# On Detector Error: block | warn | log_only   (co zrobić, gdy klasyfikator semantyczny nie działa)
+# External LLM / External Destinations / Summarize Internal: allow | block
+#   (UŻYCIE: czy rola z DOSTĘPEM może wysłać treść do zewnętrznego modelu, na zewnętrzny adres
+#    albo użyć jej wewnętrznie)
+# Authored By: manual (roadmapa: llm_extracted, zatwierdzane przez compliance)
+
+Policy Version: 1.0.0
+Enabled: true
+Semantic Provider: ollama
+Semantic Model: gemma4:12b
+Allowed Models: gemma4:12b
+Internal Domains: hackyeah2026.test
+External LLM Keywords: chatgpt, chat gpt, openai, gemini, copilot, deepseek, perplexity, claude.ai, zewnętrznego modelu, zewnętrzny model, zewnętrznym modelu, zewnętrznego llm, zewnętrznego api
+External Destination Keywords: zewnętrzny adres, zewnętrznego adresu, prywatny adres, prywatną skrzynkę, poza firmę, na zewnątrz firmy
+External Tools: send_email, http_post, upload_file, call_external_llm
+
+Rule: REG-HY26-02
+Source: regulamin_pracy.md | §2 ust. 3
+Authored By: manual
+Version: 1
+Enabled: true
+Category: classification.strictly_confidential
+Classification: strictly_confidential
+Description: Materiały ściśle poufne są dostępne wyłącznie dla IT i administratorów
+Allowed Roles: IT, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Markers: ŚCIŚLE POUFNE
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §2 ust. 3 Regulaminu pracy: materiały ściśle poufne są dostępne wyłącznie dla działu IT i administratorów."
+
+Rule: REG-HY26-04
+Source: regulamin_pracy.md | §3 ust. 2
+Authored By: manual
+Version: 1
+Enabled: true
+Category: personal_data.hr
+Classification: confidential
+Description: Wynagrodzenia, oceny okresowe i nieobecności innych pracowników są dostępne tylko dla kadr
+Allowed Roles: kadry, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: wynagrodze, pensj, zarobk, zarabia, premi, ocena okresowa, oceny okresowe, ocen okresowych, zwolnieni lekarsk, dane kadrowe, danych kadrowych
+Semantic Classifier: hr_data
+Semantic Threshold: 0.8
+On Violation: warn
+On Detector Error: block
+Notify: security, kadry
+Required Refusal: "Zablokowano zgodnie z §3 ust. 2 Regulaminu pracy: dane kadrowe innych pracowników są dostępne wyłącznie dla działu kadr."
+
+Rule: NDA-HY26-03
+Source: oswiadczenie_o_poufnosci.md | §3 ust. 1
+Authored By: manual
+Version: 1
+Enabled: true
+Category: trade_secret.clients
+Classification: confidential
+Description: Lista klientów i warunki umów z klientami są tajemnicą przedsiębiorstwa
+Allowed Roles: bankier, analityk, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: lista klientów, listę klientów, listy klientów, liście klientów, warunki umów, warunków umów, warunki umowy z klientem
+Regex: HY26-UM-\d{4}
+Fingerprint: lista_klientow.md
+Semantic Classifier: trade_secret
+Semantic Threshold: 0.75
+On Violation: redact
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §3 ust. 1 Oświadczenia o poufności: lista klientów i warunki umów są tajemnicą przedsiębiorstwa."
+
+Rule: NDA-HY26-04
+Source: oswiadczenie_o_poufnosci.md | §3 ust. 2
+Authored By: manual
+Version: 1
+Enabled: true
+Category: trade_secret.commercial
+Classification: confidential
+Description: Cenniki, rabaty i marże są tajemnicą przedsiębiorstwa
+Allowed Roles: bankier, analityk, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: cennik, rabat, upust
+Fingerprint: cennik_2026.md
+Semantic Classifier: trade_secret
+Semantic Threshold: 0.75
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §3 ust. 2 Oświadczenia o poufności: cenniki, rabaty i marże są tajemnicą przedsiębiorstwa."
+
+Rule: NDA-HY26-05
+Source: oswiadczenie_o_poufnosci.md | §4 ust. 1
+Authored By: manual
+Version: 1
+Enabled: true
+Category: trade_secret.technical
+Classification: confidential
+Description: Kod źródłowy i architektura systemów (HackTMS) są tajemnicą przedsiębiorstwa
+Allowed Roles: IT, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: hacktms, kod źródłowy, kodu źródłowego, architektura systemu, architekturę systemu, architektury systemu
+Semantic Classifier: source_code
+Semantic Threshold: 0.8
+On Violation: block
+On Detector Error: warn
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §4 ust. 1 Oświadczenia o poufności: kod źródłowy i architektura systemów są dostępne wyłącznie dla działu IT."
+
+Rule: NDA-HY26-06
+Source: oswiadczenie_o_poufnosci.md | §4 ust. 2
+Authored By: manual
+Version: 1
+Enabled: true
+Category: trade_secret.projects
+Classification: confidential
+Description: Projekty o nazwach kodowych (ORZEŁ, KORMORAN) są tajemnicą przedsiębiorstwa
+Allowed Roles: IT, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: orzeł, orzel, orła, kormoran
+Fingerprint: projekt_orzel.md
+Semantic Classifier: codename_project
+Semantic Threshold: 0.8
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §4 ust. 2 Oświadczenia o poufności: informacje o projektach o nazwach kodowych są objęte tajemnicą przedsiębiorstwa."
+
+Rule: NDA-HY26-07
+Source: oswiadczenie_o_poufnosci.md | §4 ust. 3
+Authored By: manual
+Version: 1
+Enabled: true
+Category: trade_secret.security_config
+Classification: strictly_confidential
+Description: Konfiguracje zabezpieczeń (sieci, zapory, klucze) są tajemnicą przedsiębiorstwa
+Allowed Roles: IT, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: konfiguracja sieci, konfiguracji sieci, reguły zapory, reguł zapory, firewall, vlan, hasło do wifi, klucz psk
+Regex: \b10\.20\.\d{1,3}\.\d{1,3}\b
+Regex: HY26-PSK-[A-Z0-9-]+
+Fingerprint: konfiguracja_sieci.md
+Semantic Classifier: security_config
+Semantic Threshold: 0.75
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §4 ust. 3 Oświadczenia o poufności: konfiguracje zabezpieczeń są dostępne wyłącznie dla działu IT."
+
+Rule: NDA-NFAB-04
+Source: nda_kontrahent.md | §4 ust. 1
+Authored By: manual
+Version: 1
+Enabled: true
+Category: contract.nda
+Classification: confidential
+Description: Treść umowy NDA z Nordic Freight AB jest poufna, jawny jest tylko fakt jej zawarcia
+Allowed Roles: prawnik, administrator
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Keywords: warunki umowy z nordic, warunków umowy z nordic, treść umowy z nordic, treści umowy z nordic, kary umowne, kar umownych
+Regex: HY26-NDA-\d{4}
+On Violation: block
+On Detector Error: log_only
+Notify: security, prawnik
+Required Refusal: "Zablokowano zgodnie z §4 ust. 1 Umowy o zachowaniu poufności z Nordic Freight AB: jawny jest wyłącznie fakt zawarcia umowy."
+
+Rule: AI-HY26-02
+Source: polityka_ai.md | §2 ust. 1
+Authored By: manual
+Version: 1
+Enabled: true
+Category: usage.external_ai
+Classification: confidential
+Description: Materiały z klauzulą POUFNE lub ŚCIŚLE POUFNE nie mogą trafić do zewnętrznych modeli ani adresów
+Allowed Roles: *
+External LLM: block
+External Destinations: block
+Summarize Internal: allow
+Markers: POUFNE, ŚCIŚLE POUFNE
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §2 ust. 1 Polityki AI: informacji poufnych nie wolno przekazywać do zewnętrznych modeli ani na adresy spoza firmy."
+
+Rule: AI-HY26-05
+Source: polityka_ai.md | §5 ust. 1
+Authored By: manual
+Version: 1
+Enabled: true
+Category: abuse.role_escalation
+Classification: internal
+Description: Podawanie się za osobę o innej roli lub szerszych uprawnieniach
+Allowed Roles: none
+External LLM: block
+External Destinations: block
+Summarize Internal: block
+Keywords: mam uprawnienia administratora, zmień moją rolę, nadaj mi uprawnienia
+Regex: (?i)\b(?:jestem|zostałem|działam jako|od teraz jestem)\s+(?:teraz\s+)?(?:administrator\w*|admin\w*|kierownik\w*|prezes\w*|szef\w*)
+On Violation: block
+On Detector Error: block
+Notify: security
+Required Refusal: "Zablokowano zgodnie z §5 ust. 1 Polityki AI: rola wynika z Twojego konta, a nie z treści zapytania. Próba zmiany uprawnień została zapisana w audycie."

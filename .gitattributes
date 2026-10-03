@@ -1,0 +1,5 @@
+graphify-out/graph.json merge=graphify
+backend/data/stock_market/NASDAQ[[:space:]]1962-2024.csv filter=lfs diff=lfs merge=lfs -text
+backend/data/stock_market/NYSE[[:space:]]1962-2024.csv filter=lfs diff=lfs merge=lfs -text
+backend/data/stock_market/NYSE[[:space:]]A[[:space:]]1973-2024.csv filter=lfs diff=lfs merge=lfs -text
+backend/data/stock_market/OTC[[:space:]]1972-2024.csv filter=lfs diff=lfs merge=lfs -text
