@@ -1,8 +1,9 @@
 from tools._files import list_files, read_file
 from tools._code import run_python
+from tools._subagent import create_subagent
 
 # Wszystkie narzędzia — model widzi komplet, niezależnie od roli użytkownika.
-TOOLS = [read_file, list_files, run_python]
+TOOLS = [read_file, list_files, run_python, create_subagent]
 
 TOOL_MAP = {fn.__name__: fn for fn in TOOLS}
 

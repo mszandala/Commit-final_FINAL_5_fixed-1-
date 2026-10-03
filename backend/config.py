@@ -36,10 +36,10 @@ _GENERIC_TOOLS = ["list_files", "read_file"]
 ROLES = {
     "podstawowy użytkownik": {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
     "kadry":                 {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "administrator":         {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python"], "allowed_pii": []},
+    "administrator":         {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python", "create_subagent"], "allowed_pii": []},
     "bankier":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "IT":                    {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python"], "allowed_pii": []},
-    "analityk":              {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
+    "IT":                    {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python", "create_subagent"], "allowed_pii": []},
+    "analityk":              {"description": "", "allowed_tools": _GENERIC_TOOLS + ["create_subagent"], "allowed_pii": []},
     "prawnik":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
     "Portfolio Manager":     {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
 }
