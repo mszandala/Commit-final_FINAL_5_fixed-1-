@@ -16,14 +16,52 @@ import json
 import os
 import sys
 from fnmatch import fnmatch
-
+from backend.config import OPENROUTER_API_KEY, MAX_SPENDING
+from backend.chatbot.agent import run_agent
 import requests
 import yaml
 
+TOTAL_SPENDING = 0.0
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = (
     "google/gemma-4-26b-a4b-it"  # sprawdź aktualny slug na openrouter.ai/models
 )
+
+
+KEY_INFO_URL = "https://openrouter.ai/api/v1/key"
+
+
+def get_openrouter_key_usage(session: requests.Session) -> dict:
+    resp = session.get(KEY_INFO_URL, timeout=10)
+    resp.raise_for_status()
+
+    body = resp.json()
+
+    if "error" in body:
+        raise RuntimeError(body["error"].get("message", body["error"]))
+
+    return body["data"]
+
+def print_openrouter_usage(session: requests.Session) -> float:
+    data = get_openrouter_key_usage(session)
+
+    usage = float(data.get("usage", 0))
+    daily = float(data.get("usage_daily", 0))
+
+    limit = data.get("limit")
+    remaining = data.get("limit_remaining")
+
+    print("\n--- OpenRouter ---")
+    print(f"  Wydano łącznie:     ${usage:.6f}")
+    print(f"  Dzisiaj:             ${daily:.6f}")
+
+    if limit is not None:
+        print(f"  Limit klucza:        ${float(limit):.6f}")
+
+    if remaining is not None:
+        print(f"  Pozostało z limitu:  ${float(remaining):.6f}")
+
+    return usage
 
 # Przykłady few-shot; używane tylko wtedy, gdy wszystkie ich uprawnienia istnieją w configu.
 FEW_SHOT = [
@@ -170,6 +208,19 @@ def handle(
 
     ok, missing = authorize(cfg, role, intent["required_permissions"])
     allowed = ok and not intent["suspicious"]
+    if allowed and not intent["suspicious"]:
+        _, result = run_agent(user_msg, tool_gate=None, max_depth=2)
+        print(result[-1]["content"])
+        spent = print_openrouter_usage(session)
+
+        if spent > MAX_SPENDING:
+            print(
+                f"\n[!] Przekroczono MAX_SPENDING: "
+                f"${spent:.6f} > ${MAX_SPENDING:.6f}"
+            )
+            sys.exit(1)
+
+
     return {**intent, "allowed": allowed, "missing": missing}
 
 
