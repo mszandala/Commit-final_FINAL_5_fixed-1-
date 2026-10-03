@@ -86,9 +86,13 @@ def load_model():
         folder = Path(snapshot_download(REFUSAL_MODEL, allow_patterns=["tokenizer.json"], local_files_only=True))
     except Exception:
         folder = Path(snapshot_download(REFUSAL_MODEL, allow_patterns=["tokenizer.json"]))
-    model.tokenizer = PreTrainedTokenizerFast(
+    tokenizer = PreTrainedTokenizerFast(
         tokenizer_file=str(folder / "tokenizer.json"), bos_token="<s>", eos_token="</s>", unk_token="<unk>",
         sep_token="</s>", pad_token="<pad>", cls_token="<s>", mask_token="<mask>")
+    try:
+        model.tokenizer = tokenizer
+    except AttributeError:      # sentence-transformers 6: tokenizer jest tylko do odczytu, bierze się z processor
+        model[0].processor = tokenizer
     return model
 
 

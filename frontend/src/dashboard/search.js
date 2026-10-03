@@ -38,6 +38,7 @@ const TURN_FIELDS = {
   model: (e) => fold(e.model),
   prompt: (e) => fold(e.maskedPrompt),
   masked: (e) => (e.maskedForModel ?? []).map(fold),
+  hidden: (e) => e.hidden.map(fold),
   steps: (e) => e.stepCount,
   tokens: (e) => e.tokens,
   latency: (e) => e.latencyMs,

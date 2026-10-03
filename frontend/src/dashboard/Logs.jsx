@@ -96,13 +96,18 @@ function Step({ step, zones, found }) {
   )
 }
 
-export default function Logs() {
+// `initial` opens the log on a query or filters, when the dashboard sends someone here.
+export default function Logs({ initial = {} }) {
   const meta = useMeta()
-  const [level, setLevel] = useState('info')
-  const [kind, setKind] = useState('all')
+  const [level, setLevel] = useState(initial.level ?? 'info')
+  const [kind, setKind] = useState(initial.kind ?? 'all')
   const [zone, setZone] = useState('all')
-  const [query, setQuery] = useState('')
-  const [advanced, setAdvanced] = useState(false)
+  // Each mode keeps its own query, so switching away and back finds the old one still there.
+  const [queries, setQueries] = useState({ plain: '', advanced: initial.query ?? '' })
+  const [advanced, setAdvanced] = useState(initial.query !== undefined)
+  const mode = advanced ? 'advanced' : 'plain'
+  const query = queries[mode]
+  const setQuery = (value) => setQueries({ ...queries, [mode]: value })
   // Turns opened or closed by hand; the rest follow `expandAll`.
   const [toggled, setToggled] = useState({})
   const [expandAll, setExpandAll] = useState(false)
@@ -138,14 +143,15 @@ export default function Logs() {
   const narrowed = kind !== 'all' || zone !== 'all'
   const stepMatches = (s) =>
     RANK[s.level] >= RANK[level] && (kind === 'all' || s.kind === kind) && (zone === 'all' || s.zone === zone)
-  const events = all.filter(
-    (e) => search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]),
-  )
+  // The API sends the oldest first; the log shows the newest on top.
+  const events = all
+    .filter((e) => search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]))
+    .reverse()
   const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed || found.has(e.id))
 
-  // Newest events are at the bottom, so keep the view there.
+  // Keep the view on the newest events when the log or the filters change.
   useLayoutEffect(() => {
-    scroller.current.scrollTop = scroller.current.scrollHeight
+    scroller.current.scrollTop = 0
   }, [level, kind, zone, search, all])
 
   return (
