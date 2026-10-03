@@ -19,6 +19,8 @@ from config import (
     CHATBOT_ZONE_TOOLS,
     COMPANY_POLICIES_CLASSIFIER,
     COMPANY_POLICIES_ENABLED,
+    COMPANY_POLICIES_FAIL_CLOSED,
+    COMPANY_POLICIES_SEMANTIC_BLOCKS,
     COMPANY_POLICIES_STRICT_KEYWORDS,
     CONDUCT_RULES_FILE,
     COLUMN_TYPES,
@@ -100,27 +102,39 @@ def policy_engine() -> Optional[CompanyPolicyEngine]:
     return _policy_engine
 
 
-def _soften(engine: CompanyPolicyEngine, role: str, text: str, verdict, public_only: bool = False):
-    """Zamienia na ostrzeżenie blokady oparte na słabym dowodzie (wynik narzędzia, odpowiedź).
+def _warned(verdict):
+    """Blokada zamieniona na ostrzeżenie; treść powodu przestaje mówić o zablokowaniu."""
+    verdict.decision, verdict.is_blocked = "warn", False
+    verdict.reason = verdict.reason.replace("Zablokowano zgodnie z", "Możliwe naruszenie:")
+    return verdict, True
 
-    Słaby dowód to samo słowo kluczowe albo ocena tematu przez klasyfikator, gdy do rozmowy trafiły
-    wyłącznie dane ze źródeł publicznych (`public_only`) — klasyfikator ocenia temat, nie pochodzenie,
-    więc „marże Apple” z publicznej telekonferencji uznaje za tajemnicę handlową.
-    Zwraca (werdykt, czy złagodzono). Znaczniki, wzorce i odciski plików blokują zawsze.
+
+def _soften(engine: CompanyPolicyEngine, role: str, text: str, verdict, point: str = "output",
+            public_only: bool = False):
+    """Zamienia na ostrzeżenie blokady oparte na słabym dowodzie. Zwraca (werdykt, czy złagodzono).
+
+    Słaby dowód to:
+      - niedostępny klasyfikator (chyba że COMPANY_POLICIES_FAIL_CLOSED),
+      - sama ocena tematu przez klasyfikator (chyba że COMPANY_POLICIES_SEMANTIC_BLOCKS); przy danych
+        wyłącznie ze źródeł publicznych (`public_only`) — zawsze, bo klasyfikator ocenia temat,
+        a nie pochodzenie,
+      - samo słowo kluczowe w wyniku narzędzia albo w odpowiedzi (chyba że COMPANY_POLICIES_STRICT_KEYWORDS);
+        w prompcie słowo kluczowe blokuje.
+    Znaczniki, wzorce i odciski plików blokują zawsze.
     """
-    if COMPANY_POLICIES_STRICT_KEYWORDS or verdict.decision != "block":
+    if verdict.decision != "block":
         return verdict, False
-    if verdict.details.get("layer") == "semantic" and public_only and not verdict.details.get("detector_error"):
-        verdict.decision, verdict.is_blocked = "warn", False
-        return verdict, True
-    if verdict.details.get("layer") != "deterministic":
+    if verdict.details.get("detector_error"):
+        return (verdict, False) if COMPANY_POLICIES_FAIL_CLOSED else _warned(verdict)
+    if verdict.details.get("layer") == "semantic":
+        return (verdict, False) if COMPANY_POLICIES_SEMANTIC_BLOCKS and not public_only else _warned(verdict)
+    if COMPANY_POLICIES_STRICT_KEYWORDS or point == "input" or verdict.details.get("layer") != "deterministic":
         return verdict, False
     policy = engine.store.get()
     violating = [h for h in detect_deterministic(policy, text)
                  if h.rule.on_violation == "block" and violation_type(h.rule, role, "internal")] if policy else []
     if violating and all(h.methods == ["keyword"] for h in violating):
-        verdict.decision, verdict.is_blocked = "warn", False
-        return verdict, True
+        return _warned(verdict)
     return verdict, False
 
 
@@ -316,8 +330,9 @@ class SecureToolGate:
         # Regulaminy firmowe: najpierw argumenty wywołania, po wykonaniu wynik — zanim zobaczy go model.
         engine = policy_engine()
         if engine:
-            verdict = engine.check_tool_call(self.conv.role, name, real_args)
-            _policy_check("tool", verdict)
+            verdict, softened = _soften(engine, self.conv.role, "", engine.check_tool_call(self.conv.role, name, real_args),
+                                        point="input")
+            _policy_check("tool", verdict, softened)
             if verdict.decision in ("block", "redact"):
                 return self._deny_by_policy(call, verdict,
                                             f"Access denied by company policy: {verdict.reason} Do not call this "
@@ -327,7 +342,7 @@ class SecureToolGate:
         if engine and local:
             verdict, softened = _soften(engine, self.conv.role, result,
                                         engine.filter_context(self.conv.role, result, source=name),
-                                        public_only=name in PUBLIC_SOURCE_TOOLS)
+                                        point="retrieval", public_only=name in PUBLIC_SOURCE_TOOLS)
             _policy_check("retrieval", verdict, softened)
             if verdict.decision == "block":
                 return self._deny_by_policy(call, verdict,
@@ -523,8 +538,9 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     policy_note = None
     prompt = user_message
     if engine:
-        checked = engine.check_input(conv.role, user_message)
-        _policy_check("input", checked)
+        checked, softened = _soften(engine, conv.role, user_message,
+                                    engine.check_input(conv.role, user_message), point="input")
+        _policy_check("input", checked, softened)
         if checked.decision == "block":
             return finish(f"Zapytanie zostało zablokowane: {checked.reason}", block(checked.stage, checked.reason),
                           _logged_prompt(user_message, threshold))
@@ -572,7 +588,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
 
     if engine:
         checked, softened = _soften(engine, conv.role, reply, engine.check_output(conv.role, reply),
-                                    public_only=not conv.private_context)
+                                    point="output", public_only=not conv.private_context)
         _policy_check("output", checked, softened)
         if checked.decision == "block":
             return finish(f"Odpowiedź została zablokowana: {checked.reason}", block(checked.stage, checked.reason),

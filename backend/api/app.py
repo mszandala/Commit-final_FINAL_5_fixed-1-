@@ -59,6 +59,13 @@ def _role_name(role_id: str) -> str:
     return name
 
 
+def _config_problem() -> Optional[str]:
+    """Powód, dla którego model nie odpowie, zanim zaczniemy turę (np. brak klucza dostawcy)."""
+    if SETTINGS.provider == "openrouter" and not SETTINGS.openrouter_api_key:
+        return "Brak klucza OpenRouter: ustaw OPENROUTER_API_KEY w backend/.env albo podaj klucz w konfiguracji"
+    return None
+
+
 def _budget(name: str) -> schemas.Budget:
     return schemas.Budget(limit=state.budget.token_limit(name), used=state.budget.tokens_used(name),
                           spending_limit=MAX_SPENDING, spent=round(state.budget.spent(name), 6))
@@ -99,6 +106,8 @@ def _open(request: schemas.ChatRequest) -> tuple[str, state.Session]:
 def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_progress=None) -> schemas.ChatResponse:
     """Jedna tura czatu: budżet -> pipeline -> wiersz logu -> odpowiedź."""
     conv = session.conversation
+    if problem := _config_problem():
+        raise HTTPException(503, problem)
     over_budget = state.budget.check(name, request.message)
     if over_budget:
         event = state.add_event(name, conv.id, over_budget)
@@ -132,7 +141,9 @@ def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_pro
 
 @router.get("/health", response_model=schemas.Health, tags=["meta"])
 def health():
-    return {"status": "ok", "provider": SETTINGS.provider, "model": SETTINGS.model}
+    problem = _config_problem()
+    return {"status": "degraded" if problem else "ok", "provider": SETTINGS.provider, "model": SETTINGS.model,
+            "problem": problem}
 
 
 @router.get("/meta", response_model=schemas.Meta, tags=["meta"],

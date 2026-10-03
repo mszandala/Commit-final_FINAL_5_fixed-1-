@@ -336,7 +336,8 @@ def test_policy_classifier_verdict_on_public_data_warns(llm, env, policies, monk
     assert not result.blocked and result.reply == "Marża brutto Apple wzrosła."
     assert result.verdict["decision"] == "warn" and result.verdict["stage"] == "company_policies"
 
-    # gdy do rozmowy trafił wynik narzędzia niepublicznego, blokada klasyfikatora zostaje w mocy
+    # z COMPANY_POLICIES_SEMANTIC_BLOCKS ocena klasyfikatora blokuje, gdy w rozmowie są dane niepubliczne
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_SEMANTIC_BLOCKS", True)
     (env / "employee_data").mkdir()
     (env / "employee_data" / "WA_Fn-UseC_-HR-Employee-Attrition.csv").write_text(
         "Age,Department" + chr(10) + "41,Sales" + chr(10), encoding="utf-8")
@@ -406,3 +407,36 @@ def test_reply_judge_keeps_what_is_not_personal_data(llm, env, monkeypatch):
     llm.judge = RuntimeError("brak modelu")              # sędzia niedostępny: ukrywamy wszystko
     llm.queue = [_reply("Masa Księżyca jest duża.")]
     assert pipeline.run_turn(pipeline.Conversation("IT"), "Ile waży księżyc?").reply == "[NAME] jest duża."
+
+
+def test_classifier_alone_warns_instead_of_blocking_the_prompt(llm, env, policies, monkeypatch):
+    policies.classifier = lambda text, categories, policy: {"category": "trade_secret", "confidence": 1.0, "reason": ""}
+    llm.queue = [_reply("AMZN jest droższa.")]
+    result = pipeline.run_turn(pipeline.Conversation("prawnik"), "Co kosztuje więcej, akcja Amazona czy Nvidii?")
+    assert not result.blocked and result.reply == "AMZN jest droższa."
+    warning = next(v for v in result.verdicts if v["stage"] == "company_policies")
+    assert warning["decision"] == "warn" and not warning["reason"].startswith("Zablokowano")
+    event = next(e for e in result.events if e["type"] == "company_policy" and e["point"] == "input")
+    assert event["decision"] == "warn" and event["softened"] is True
+
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_SEMANTIC_BLOCKS", True)
+    result = pipeline.run_turn(pipeline.Conversation("prawnik"), "Co kosztuje więcej, akcja Amazona czy Nvidii?")
+    assert result.blocked and result.verdict["stage"] == "company_policies"
+
+
+def test_unavailable_classifier_does_not_block_every_turn(llm, env, policies, monkeypatch):
+    def broken(text, categories, policy):
+        raise ConnectionError("brak klucza")
+    policies.classifier = broken
+    llm.queue = [_reply("Są dwa projekty.")]
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Jakie mamy projekty?")
+    assert not result.blocked and result.reply == "Są dwa projekty."
+
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_FAIL_CLOSED", True)
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Jakie mamy projekty?")
+    assert result.blocked and "niedostępny" in result.verdict["reason"]
+
+
+def test_keyword_in_the_prompt_still_blocks(llm, env, policies):
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Jakie rabaty mamy w cenniku dla klientów?")
+    assert result.blocked and result.verdict["reason"].startswith("Zablokowano")

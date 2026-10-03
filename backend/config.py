@@ -114,6 +114,13 @@ COMPANY_POLICIES_CLASSIFIER = os.getenv("COMPANY_POLICIES_CLASSIFIER", "security
 # wyników spółki), więc domyślnie daje ostrzeżenie zamiast blokady. W prompcie blokuje jak dotąd;
 # znaczniki, wzorce, odciski plików i klasyfikator blokują wszędzie. true = blokuj także tutaj.
 COMPANY_POLICIES_STRICT_KEYWORDS = os.getenv("COMPANY_POLICIES_STRICT_KEYWORDS", "false").lower() == "true"
+# Ocena tematu przez klasyfikator bez twardego dowodu (klauzula, numer umowy, odcisk pliku) myli się
+# zbyt często, żeby sama blokowała: w testach QA zatrzymywała zwykłe pytania jako „cenniki i marże".
+# Domyślnie daje ostrzeżenie; true = blokuj jak w regułach.
+COMPANY_POLICIES_SEMANTIC_BLOCKS = os.getenv("COMPANY_POLICIES_SEMANTIC_BLOCKS", "false").lower() == "true"
+# Gdy klasyfikator jest niedostępny (brak klucza, błąd dostawcy): true = blokuj (fail-closed, jak
+# w regułach), false = ostrzeżenie i sprawdzenie samymi regułami deterministycznymi.
+COMPANY_POLICIES_FAIL_CLOSED = os.getenv("COMPANY_POLICIES_FAIL_CLOSED", "false").lower() == "true"
 
 # Wykrywanie odmowy w odpowiedzi chatbota (security/refusal_detector.py): słowa kluczowe, a gdy nic
 # nie znajdą — podobieństwo zdań do wzorcowych odmów liczone lokalnym modelem embeddingów.

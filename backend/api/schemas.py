@@ -228,6 +228,7 @@ class Stats(ApiModel):
 
 
 class Health(ApiModel):
-    status: str
+    status: str = Field(description='"ok" albo "degraded", gdy konfiguracja nie pozwala wołać modelu')
     provider: str
     model: str
+    problem: Optional[str] = Field(None, description="Co jest nie tak z konfiguracją; null, gdy wszystko w porządku")
