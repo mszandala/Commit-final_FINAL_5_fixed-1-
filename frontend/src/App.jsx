@@ -30,7 +30,7 @@ export default function App() {
   return (
     <main className="relative flex h-screen">
       <div className="w-[440px] shrink-0 border-r border-line">
-        <Chat />
+        <Chat config={saved} />
       </div>
       <div className="min-w-0 flex-1">
         <Dashboard configOpen={configOpen} onOpenConfig={() => setConfigOpen(true)} onLeaveConfig={leaveConfig} />

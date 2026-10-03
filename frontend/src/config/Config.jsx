@@ -71,7 +71,7 @@ export default function Config({ config, dirty, onChange, onSave }) {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-5xl space-y-7 px-6 py-5">
+      <div className="mx-auto max-w-6xl space-y-7 px-6 py-5">
         <Section title="Model">
           <Row label="Provider">
             <div role="radiogroup" aria-label="Provider" className="flex gap-1">
@@ -212,12 +212,12 @@ export default function Config({ config, dirty, onChange, onSave }) {
         </Section>
 
         <Section title="Roles">
-          {/* Fixed layout: role and PII columns split the leftover width evenly, which centres the checkboxes. */}
+          {/* Fixed layout: the PII column takes whatever the fixed columns leave. */}
           <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
             <colgroup>
-              <col />
+              <col className="w-40" />
               {DATA_ACCESS.map((a) => (
-                <col key={a.id} className="w-28" />
+                <col key={a.id} className="w-20" />
               ))}
               <col />
             </colgroup>

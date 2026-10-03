@@ -1,10 +1,10 @@
 import { LoaderCircle } from 'lucide-react'
 
-export default function Pending() {
+export default function Pending({ stage }) {
   return (
-    <p className="flex items-center gap-2 text-sm text-grey">
+    <p className="flex items-center gap-1.5 text-sm text-grey">
       <LoaderCircle size={14} className="animate-spin" />
-      Sample status
+      {stage}
     </p>
   )
 }

@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Search } from 'lucide-react'
-import { getEvents } from '../mock/events'
+import { getEvents, subscribeEvents } from '../mock/events'
 import { formatNumber } from '../format'
 
 const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked']
@@ -37,7 +37,8 @@ export default function Logs() {
   const scroller = useRef(null)
 
   const needle = query.trim().toLowerCase()
-  const events = getEvents().filter(
+  const all = useSyncExternalStore(subscribeEvents, getEvents)
+  const events = all.filter(
     (e) =>
       (decision === 'All' || e.decision === decision) &&
       (!needle || `${e.user} ${e.control} ${e.reason}`.toLowerCase().includes(needle)),
@@ -46,7 +47,7 @@ export default function Logs() {
   // Newest events are at the bottom, so keep the view there.
   useLayoutEffect(() => {
     scroller.current.scrollTop = scroller.current.scrollHeight
-  }, [decision, needle])
+  }, [decision, needle, all])
 
   return (
     <div className="flex h-full flex-col">
@@ -111,7 +112,7 @@ export default function Logs() {
                     {e.role}
                   </td>
                   <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.control}>
-                    {e.control || <span className="text-grey">–</span>}
+                    {e.control || <span className="text-grey">&ndash;</span>}
                   </td>
                   <td className="border-b border-line px-2.5 py-1 text-grey">
                     <div className="line-clamp-2 max-w-60" title={e.reason}>

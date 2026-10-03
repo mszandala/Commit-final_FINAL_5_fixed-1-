@@ -1,85 +1,89 @@
 import { useEffect, useRef, useState } from 'react'
-import { CloudOff, Gauge, RotateCw } from 'lucide-react'
-import { ROLES } from '../mock/data'
+import { Gauge } from 'lucide-react'
+import { USERS } from '../mock/data'
 import { sendMessage } from '../mock/chat'
-import Button from '../ui/Button'
-import Notice from '../ui/Notice'
 import ChatItem from './ChatItem'
 import Composer from './Composer'
-import Pending from './Pending'
+import Examples from './Examples'
 import UserMenu from './UserMenu'
 
 const BUDGET_WARNING = 0.8
 
 let nextId = 1
 
-export default function Chat() {
-  const [role, setRole] = useState('employee')
+export default function Chat({ config }) {
+  const [roleId, setRoleId] = useState('basic_user')
   const [items, setItems] = useState([])
-  const [pending, setPending] = useState(false)
+  // Switching user starts a new session; the divider goes in with that session's first message.
+  const [sessionStarted, setSessionStarted] = useState(false)
+  // Stage and tool calls of the request in flight.
+  const [pending, setPending] = useState(null)
   const [failed, setFailed] = useState(null)
+  // Tokens used today, per user; starts from the mock figures.
+  const [usage, setUsage] = useState(() => Object.fromEntries(Object.entries(USERS).map(([id, u]) => [id, u.used])))
   const listRef = useRef(null)
 
-  const account = { used: ROLES[role].used, limit: ROLES[role].budget }
+  const user = USERS[roleId]
+  const role = config.roles.find((r) => r.id === roleId)
+  const account = { used: usage[roleId], limit: user.budget }
   const share = account.used / account.limit
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [items, pending, failed])
 
-  function switchRole(next) {
-    setRole(next)
-    setItems([])
+  function switchUser(next) {
+    setRoleId(next)
+    setSessionStarted(false)
     setFailed(null)
   }
 
-  async function send(text) {
+  async function send(text, files) {
     setFailed(null)
-    setPending(true)
+    setPending({ stage: '', tools: [] })
     try {
-      const result = await sendMessage(text)
+      const result = await sendMessage({ text, files, user, used: usage[roleId], role, config }, setPending)
+      setUsage((prev) => ({ ...prev, [roleId]: prev[roleId] + result.tokens }))
       setItems((prev) => [...prev, { id: nextId++, kind: 'reply', ...result }])
     } catch {
-      setFailed(text)
+      setFailed({ text, files })
     } finally {
-      setPending(false)
+      setPending(null)
     }
   }
 
   function submit(text, files = []) {
     const attached = files.map(({ name, size }) => ({ name, size }))
-    setItems((prev) => [...prev, { id: nextId++, kind: 'user', text, files: attached }])
-    send(text)
+    const added = [{ id: nextId++, kind: 'user', text, files: attached }]
+    if (!sessionStarted) added.unshift({ id: nextId++, kind: 'session', name: user.name, role: role.label })
+    setSessionStarted(true)
+    setItems((prev) => [...prev, ...added])
+    send(text, attached)
   }
 
   return (
     <section className="flex h-full flex-col bg-white">
       <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
-        <UserMenu role={role} account={account} disabled={pending} onSwitch={switchRole} />
+        <UserMenu roles={config.roles} roleId={roleId} account={account} disabled={!!pending} onSwitch={switchUser} />
       </header>
 
       <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
         {items.map((item) => (
           <ChatItem key={item.id} item={item} />
         ))}
-        {pending && <Pending />}
-        {failed && (
-          <Notice icon={CloudOff} title="Cannot reach the server">
-            <Button size="sm" icon={RotateCw} onClick={() => send(failed)} className="mt-2">
-              Retry
-            </Button>
-          </Notice>
-        )}
+        {pending && <ChatItem item={{ kind: 'pending', ...pending }} />}
+        {failed && <ChatItem item={{ kind: 'error' }} onRetry={() => send(failed.text, failed.files)} />}
       </div>
 
-      <footer className="shrink-0 space-y-2.5 px-5 pb-5">
-        {share >= BUDGET_WARNING && share < 1 && (
-          <p className="flex items-center gap-1.5 text-[13px] text-amber-text">
+      <footer className="shrink-0 space-y-2.5 border-t border-line px-5 pt-3 pb-5">
+        <Examples disabled={!!pending} onPick={(text) => submit(text)} />
+        {share >= BUDGET_WARNING && (
+          <p className={`flex items-center gap-1.5 text-[13px] ${share < 1 ? 'text-amber-text' : 'text-red-text'}`}>
             <Gauge size={14} />
-            {Math.round(share * 100)}% of today's budget used
+            {share < 1 ? `${Math.round(share * 100)}% of today's budget used` : "Today's budget is used up"}
           </p>
         )}
-        <Composer disabled={pending} onSend={submit} />
+        <Composer disabled={!!pending} onSend={submit} />
       </footer>
     </section>
   )
