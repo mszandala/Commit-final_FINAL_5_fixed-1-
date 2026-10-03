@@ -113,3 +113,17 @@ def test_regex_detects_structural_secrets():
     assert [(e["type"], e["text"]) for e in detect_regex_pii(f"use: Bearer {jwt}. It expires soon.")] == [("PASSWORD", jwt)]
     assert [e["text"] for e in detect_regex_pii("id AKIA4ZX9QWER7TYUIOP2 here")] == ["AKIA4ZX9QWER7TYUIOP2"]
     assert detect_regex_pii('-H "Authorization: Bearer YOUR_API_KEY_HERE"') == []
+
+
+def test_pesel_is_its_own_type():
+    assert [(e["type"], e["text"]) for e in detect_regex_pii("PESEL 44051401359")] == [("PESEL", "44051401359")]
+    # błędna cyfra kontrolna, ale użytkownik sam nazwał numer
+    assert [(e["type"], e["text"]) for e in detect_regex_pii("mój pesel to: 90010112345")] == [("PESEL", "90010112345")]
+    # 11 cyfr bez kontekstu i bez poprawnej cyfry kontrolnej zostaje numerem telefonu
+    assert [e["type"] for e in detect_regex_pii("zadzwoń 12345678901")] == ["PHONE-NO"]
+
+
+def test_decimal_fractions_are_not_numbers_to_hide():
+    for text in ["The value is approximately 22.459157718361045", "e^pi = 23,140692632779267", "1.4111111111111111"]:
+        assert detect_regex_pii(text) == [], text
+    assert [e["type"] for e in detect_regex_pii("tel 601-234-567")] == ["PHONE-NO"]

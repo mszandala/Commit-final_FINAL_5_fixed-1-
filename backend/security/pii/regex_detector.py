@@ -36,6 +36,21 @@ _DATE_LIKE = re.compile(
 )
 
 
+# PESEL: 11 cyfr. Bez słowa "PESEL" obok wymagamy poprawnej cyfry kontrolnej.
+PESEL_PATTERN = re.compile(r'(?<!\d)\d{11}(?!\d)')
+_PESEL_KEYWORD = re.compile(r'pesel[^0-9]{0,20}$', re.IGNORECASE)
+
+
+def _pesel_ok(digits: str) -> bool:
+    weights = (1, 3, 7, 9, 1, 3, 7, 9, 1, 3)
+    return (10 - sum(int(d) * w for d, w in zip(digits, weights)) % 10) % 10 == int(digits[10])
+
+
+def in_decimal(text: str, start: int) -> bool:
+    """Czy ciąg cyfr zaczynający się w `start` to część ułamkowa liczby (np. 22.459157718), a nie numer."""
+    return 2 <= start <= len(text) and text[start - 1] in ".," and text[start - 2].isdigit()
+
+
 def is_date_like(text: str) -> bool:
     """Czy ciąg cyfr to data albo zakres lat, a nie numer telefonu."""
     return bool(_DATE_LIKE.fullmatch(text.strip()))
@@ -94,9 +109,22 @@ def detect_regex_pii(text: str) -> list[dict]:
             "end": m.end(),
         })
 
-    # 3. Numery kart płatniczych: 13-19 cyfr z poprawną sumą kontrolną Luhna
+    # 3. PESEL i numery kart płatniczych (13-19 cyfr z poprawną sumą kontrolną Luhna)
     cards = []
+    for m in PESEL_PATTERN.finditer(text):
+        if in_decimal(text, m.start()):
+            continue
+        if _pesel_ok(m.group(0)) or _PESEL_KEYWORD.search(text[: m.start()]):
+            cards.append(m.span())
+            entities.append({
+                "type": "PESEL",
+                "text": m.group(0),
+                "start": m.start(),
+                "end": m.end(),
+            })
     for m in CARD_PATTERN.finditer(text):
+        if in_decimal(text, m.start()):
+            continue
         if _luhn_ok(re.sub(r"\D", "", m.group(0))):
             cards.append(m.span())
             entities.append({
@@ -106,9 +134,11 @@ def detect_regex_pii(text: str) -> list[dict]:
                 "end": m.end(),
             })
 
-    # 4. Numery telefonów (z pominięciem ciągów rozpoznanych jako karty)
+    # 4. Numery telefonów: 7-15 cyfr, z pominięciem kart, numerów PESEL, dat i części ułamkowych liczb
     for m in PHONE_PATTERN.finditer(text):
         if any(m.start() < end and start < m.end() for start, end in cards) or is_date_like(m.group(0)):
+            continue
+        if in_decimal(text, m.start()) or not 7 <= sum(c.isdigit() for c in m.group(0)) <= 15:
             continue
         entities.append({
             "type": "PHONE-NO",

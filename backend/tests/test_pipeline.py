@@ -351,6 +351,8 @@ def test_common_words_are_not_hidden_as_locations(monkeypatch):
     entities = [{"type": "LOCATION", "text": t, "start": text.index(t), "end": text.index(t) + len(t)}
                 for t in text.split(", ")]
     monkeypatch.setattr(pipeline, "_detect", lambda text, threshold=None: [dict(e) for e in entities])
+    # miejsca są domyślnie widoczne; reguła dotyczy roli, która ma je ukrywane
+    monkeypatch.setitem(ROLES["podstawowy użytkownik"], "pii_policy", {"LOCATION": "redact"})
     shown = pipeline.filter_output("podstawowy użytkownik", text)[0]
     assert shown == "city, demo environment, [LOCATION], [LOCATION]"
 
@@ -367,3 +369,40 @@ def test_dates_reported_by_the_model_detector_are_ignored(llm, env, monkeypatch)
         {"type": "PHONE-NO", "text": "2024-01-05", "start": 3, "end": 13}])
     llm.queue = [_reply("ok")]
     assert pipeline.run_turn(pipeline.Conversation("prawnik"), "Od 2024-01-05").masked_prompt == "Od 2024-01-05"
+
+
+def test_model_detections_of_numbers_need_the_right_shape(monkeypatch):
+    text = "Wynik: 22.459157718361045, masa 7.35 razy 10, pensja 5 000 zł, karta 4111 1111 1111 1111."
+    def at(kind, value):
+        start = text.index(value)
+        return {"type": kind, "text": value, "start": start, "end": start + len(value)}
+    monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: [
+        at("CREDIT-CARD-NO", "459157718361045"),      # część ułamkowa liczby
+        at("SALARY", "7.35"),                         # liczba bez waluty
+        at("SALARY", "5 000 zł"),
+        at("CREDIT-CARD-NO", "4111 1111 1111 1111"),
+    ])
+    pipeline._detect_cached.cache_clear()
+    assert [(e["type"], e["text"]) for e in pipeline._detect(text, None)] == [
+        ("SALARY", "5 000 zł"), ("CREDIT-CARD-NO", "4111 1111 1111 1111")]
+
+
+def test_reply_judge_keeps_what_is_not_personal_data(llm, env, monkeypatch):
+    def detector(text, threshold=None):
+        found = []
+        for value in ("Masa Księżyca", "Jan Kowalski"):
+            if value in text:
+                found.append({"type": "NAME", "text": value, "start": text.index(value), "end": text.index(value) + len(value)})
+        return found
+    monkeypatch.setattr(pipeline, "detect_pii", detector)
+
+    llm.judge = '{"1": {"decision": "keep", "reason": "a physical quantity"}, "2": {"decision": "hide", "reason": "a person"}}'
+    llm.queue = [_reply("Masa Księżyca jest duża, a Jan Kowalski to wie.")]
+    result = pipeline.run_turn(pipeline.Conversation("IT"), "Ile waży księżyc?")
+    assert result.reply == "Masa Księżyca jest duża, a [NAME] to wie."
+    judge = [e for e in result.events if e["type"] == "pii_judge"][-1]
+    assert judge["target"] == "reply" and [d["decision"] for d in judge["decisions"]] == ["keep", "hide"]
+
+    llm.judge = RuntimeError("brak modelu")              # sędzia niedostępny: ukrywamy wszystko
+    llm.queue = [_reply("Masa Księżyca jest duża.")]
+    assert pipeline.run_turn(pipeline.Conversation("IT"), "Ile waży księżyc?").reply == "[NAME] jest duża."

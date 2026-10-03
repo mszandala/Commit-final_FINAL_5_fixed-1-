@@ -76,7 +76,7 @@ def test_meta_and_roles():
     meta = client.get(f"{API}/meta").json()
     assert [a["id"] for a in meta["dataAccess"]] == ["projects", "hr", "clients", "campaigns", "stocks",
                                                      "earnings", "code", "subagents"]
-    assert meta["piiTags"] == ["NAME", "SALARY", "ORGANIZATION", "LOCATION", "PROJECT"]
+    assert meta["piiTags"] == ["NAME", "SALARY", "PESEL"]
     assert meta["redactedPii"] == ["EMAIL", "PHONE-NO"] and meta["blockedPii"] == ["PASSWORD", "CREDIT-CARD-NO"]
     assert set(meta["controls"]) == {"prompt_guard", "tool_whitelist", "pii_policy", "code_guard",
                                      "company_policies", "chatbot_refusal", "budget"}

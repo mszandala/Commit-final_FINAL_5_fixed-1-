@@ -25,6 +25,7 @@ from security.budget import Budget
 
 # Typy PII, o których decyduje konfiguracja roli (reszta jest globalna albo dotyczy identyfikatorów).
 ROLE_PII_TAGS = [t for t, action in DEFAULT_ROLE_PII_POLICY.items() if action == "redact" and t not in ID_TYPES]
+# Nazwy miejsc, organizacji i projektów widzi każda rola, więc nie ma ich wśród typów do ustawienia.
 AREA_TOOLS = {tool for area in DATA_ACCESS.values() for tool in area["tools"]}
 
 ROLE_BY_ID = {cfg["id"]: name for name, cfg in ROLES.items()}

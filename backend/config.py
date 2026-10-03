@@ -178,6 +178,7 @@ PII_LABELS = {
     "CLIENT-ID":      "Client ID",
     "ACCOUNT-NO":     "Account number",
     "EMPLOYEE-ID":    "Employee ID",
+    "PESEL":          "PESEL",
     "REDACTED":       "Hidden",
 }
 
@@ -258,6 +259,7 @@ CHATBOT_PII_POLICY = {
     "CLIENT-ID":      "redact",
     "ACCOUNT-NO":     "redact",
     "EMPLOYEE-ID":    "redact",
+    "PESEL":          "redact",
     "NAME":           "judge",
     "SALARY":         "judge",
     "ORGANIZATION":   "allow",
@@ -275,9 +277,12 @@ CHATBOT_PII_POLICY = {
 DEFAULT_ROLE_PII_POLICY = {
     "NAME":           "redact",
     "SALARY":         "redact",
-    "ORGANIZATION":   "redact",
-    "LOCATION":       "redact",
-    "PROJECT":        "redact",
+    "PESEL":          "redact",
+    # Nazwy miejsc, organizacji i projektów nie są danymi osobowymi: widzi je każda rola,
+    # niezależnie od `allowed_pii` (ukrywanie ich psuło zwykłe odpowiedzi).
+    "ORGANIZATION":   "allow",
+    "LOCATION":       "allow",
+    "PROJECT":        "allow",
     "CLIENT-ID":      "allow",     # kto ma narzędzie do rekordów, ten widzi ich identyfikatory
     "ACCOUNT-NO":     "allow",
     "EMPLOYEE-ID":    "allow",

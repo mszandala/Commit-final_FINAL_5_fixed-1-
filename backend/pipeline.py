@@ -6,6 +6,7 @@ Dwie strefy zaufania:
   - chatbot: model odpowiadający użytkownikowi — widzi tylko wersję zamaskowaną.
 Narzędzia wykonują się lokalnie na prawdziwych wartościach; maska leży na granicy wywołania chatbota.
 """
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -42,9 +43,9 @@ from security.common.roles import normalize_role
 from security.common.verdicts import Verdict
 from security.masking import Vault, chatbot_action, label_for, role_policy
 from security.pii.pii_detector import detect_pii
-from security.pii.regex_detector import detect_regex_pii, is_date_like
+from security.pii.regex_detector import _luhn_ok, detect_regex_pii, in_decimal, is_date_like
 from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, detect_refusal
-from security.pii_judge import judge_entities
+from security.pii_judge import judge_entities, judge_reply_entities
 from security.prompt_guard import check_prompt
 from security.tool_whitelist import ToolGate
 from tools.registry import run_tool
@@ -185,21 +186,36 @@ def _detect_cached(text: str, threshold: Optional[float]) -> tuple:
     return tuple(tuple(sorted(e.items())) for e in detect_pii(text, threshold=threshold))
 
 
-def _well_formed(entity: dict) -> bool:
-    """Odrzuca wykrycia, które nie mają budowy swojego typu (np. "rachunku" jako numer karty)."""
+_CURRENCY = re.compile(r"zł|pln|usd|eur|gbp|chf|[$€£]|dolar|euro|złot", re.IGNORECASE)
+
+
+def _well_formed(entity: dict, source: str) -> bool:
+    """Odrzuca wykrycia, które nie mają budowy swojego typu.
+
+    Detektor oparty na modelu bierze za numery części ułamkowe liczb ("22.459157718"), za numer
+    karty słowo "rachunku", a za wynagrodzenie każdą liczbę — bez tych reguł wynik obliczeń
+    blokuje całą odpowiedź.
+    """
     text = entity["text"]
-    digits = sum(c.isdigit() for c in text)
-    return {
-        # Próg celowo niski: detektor bywa myli typ liczby (np. SSN jako numer karty), a i tak warto ją ukryć.
-        "CREDIT-CARD-NO": digits >= 4,
-        "PHONE-NO": digits >= 4 and not is_date_like(text),      # model też bierze daty za telefony
-        "EMAIL": "@" in text,
-        "SALARY": digits >= 1,
-    }.get(entity["type"], True)
+    digits = re.sub(r"\D", "", text)
+    kind = entity["type"]
+    if kind in ("PHONE-NO", "CREDIT-CARD-NO") and in_decimal(source, entity["start"]):
+        return False
+    if kind == "CREDIT-CARD-NO":
+        return 13 <= len(digits) <= 19 and _luhn_ok(digits)
+    if kind == "PHONE-NO":
+        return 7 <= len(digits) <= 15 and not is_date_like(text)
+    if kind == "EMAIL":
+        return "@" in text
+    if kind == "SALARY":
+        # Kwota to liczba z walutą w samej encji albo tuż obok niej.
+        around = source[max(0, entity["start"] - 12): entity["end"] + 12]
+        return bool(digits) and bool(_CURRENCY.search(around))
+    return True
 
 
 def _detect(text: str, threshold: Optional[float]) -> list[dict]:
-    return [e for e in (dict(e) for e in _detect_cached(text, threshold)) if _well_formed(e)]
+    return [e for e in (dict(e) for e in _detect_cached(text, threshold)) if _well_formed(e, text)]
 
 
 def _replace_spans(text: str, entities: list[dict], replacement) -> str:
@@ -364,13 +380,15 @@ def _plausible(entity: dict) -> bool:
 
 
 def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts=(), public_texts=(),
-                  threshold: Optional[float] = None, redact: bool = True) -> tuple[str, str, dict]:
+                  threshold: Optional[float] = None, redact: bool = True, judge: bool = False) -> tuple[str, str, dict]:
     """Filtr odpowiedzi w kanale użytkownika.
 
     Nie ukrywa wartości, które użytkownik sam wpisał (`own_texts`) ani pochodzących ze źródeł
     publicznych (`public_texts`). Zwraca (tekst dla użytkownika, tekst do logu, statystyki);
     statystyki zawierają klucz "blocked" z typami, które wymuszają blokadę całej odpowiedzi.
     Przy `redact=False` nic nie jest ukrywane (typy trafiają do "found"), ale blokady nadal działają.
+    Przy `judge=True` imiona i kwoty przed ukryciem ocenia sędzia LLM: "Masa Księżyca" albo nazwa
+    stanowiska to nie dane osobowe, choć detektor tak je oznacza.
     """
     vault = vault or Vault()
     policy = role_policy(role)
@@ -396,6 +414,15 @@ def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts
             found.append(e["type"])
         else:
             to_replace.append(e)
+
+    # Typy, które w kanale chatbota rozstrzyga sędzia (imię i nazwisko, kwota), ocenia on także tutaj.
+    doubtful = [e for e in to_replace if e["action"] == "redact" and chatbot_action(e["type"]) == "judge"]
+    if judge and doubtful:
+        for e, decision in zip(doubtful, judge_reply_entities(role, text, doubtful)):
+            if decision == "keep":
+                e["action"] = "exempt"
+                exempted.append(e["type"])
+        to_replace = [e for e in to_replace if e["action"] != "exempt"]
 
     def visible(e):
         return vault.token_for(e["type"], e["text"]) if e["action"] == "pseudonymize" else label_for(e["type"])
@@ -534,7 +561,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     stage(STAGE_REPLY)
     reply, logged_reply, output = filter_output(
         conv.role, raw_reply or "", conv.vault, conv.user_texts, conv.public_texts, threshold,
-        redact=SETTINGS.mask_pii)
+        redact=SETTINGS.mask_pii, judge=PII_JUDGE_ENABLED)
     audit.record("output_filter", "security", restored=output["restored"], redacted=output["redacted"],
                  blocked=output["blocked"], exempt=output["exempt"], found=output["found"])
     if output["blocked"]:
