@@ -1,8 +1,10 @@
-import { Fragment, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronRight, Search } from 'lucide-react'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { ChevronRight } from 'lucide-react'
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
 import { useMeta } from '../meta'
+import SearchBox from './SearchBox'
+import { advancedMatcher, plainMatcher } from './search'
 
 // The backend grades every turn and every step: info (nothing to report), warn (flagged or
 // data hidden) and block. A turn takes the highest level among its steps.
@@ -66,11 +68,14 @@ function Select({ label, value, onChange, options }) {
   )
 }
 
-function Step({ step, zones }) {
+// `found`: the search matched this step and not all of its turn's steps.
+function Step({ step, zones, found }) {
   return (
     <details className="group">
       <summary
-        className={`flex cursor-pointer list-none items-baseline gap-2 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${TINTS[step.level]}`}
+        className={`flex cursor-pointer list-none items-baseline gap-2 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${
+          found ? 'bg-blue-light/40' : TINTS[step.level]
+        }`}
         title={LEVEL_NAMES[step.level]}
       >
         <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
@@ -95,35 +100,57 @@ export default function Logs() {
   const [kind, setKind] = useState('all')
   const [zone, setZone] = useState('all')
   const [query, setQuery] = useState('')
+  const [advanced, setAdvanced] = useState(false)
   // Turns opened or closed by hand; the rest follow `expandAll`.
   const [toggled, setToggled] = useState({})
   const [expandAll, setExpandAll] = useState(false)
 
   const scroller = useRef(null)
 
-  const needle = query.trim().toLowerCase()
   const all = useSyncExternalStore(subscribeEvents, getEvents)
+
+  // While an advanced query is half typed or wrong, the table keeps the last results that worked
+  // in this mode, or shows everything right after a switch.
+  const result = useMemo(
+    () => (advanced ? advancedMatcher(query, meta) : plainMatcher(query, meta)),
+    [advanced, query, meta],
+  )
+  const everything = useMemo(() => plainMatcher('', meta), [meta])
+  const [kept, setKept] = useState({ advanced, result })
+  if (!result.error && result !== kept.result) setKept({ advanced, result })
+  const search = kept.advanced === advanced ? kept.result : everything
+
+  // Turns where the search found some steps but not all open on them, with those steps marked.
+  // An empty query finds every step, so nothing is marked.
+  const found = useMemo(() => {
+    const map = new Map()
+    for (const e of all) {
+      const hits = e.steps.filter((s) => search.matchStep(e, s))
+      if (hits.length && hits.length < e.steps.length) map.set(e.id, new Set(hits))
+    }
+    return map
+  }, [all, search])
 
   // With a step type or zone chosen, a turn is listed when one of its steps matches, and only
   // those steps are shown under it.
   const narrowed = kind !== 'all' || zone !== 'all'
   const stepMatches = (s) =>
     RANK[s.level] >= RANK[level] && (kind === 'all' || s.kind === kind) && (zone === 'all' || s.zone === zone)
-  const events = all.filter((e) => {
-    const text = `${e.user} ${e.role} ${e.control} ${e.reason} ${e.steps.map((s) => s.summary).join(' ')}`
-    if (needle && !text.toLowerCase().includes(needle)) return false
-    return narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]
-  })
-  const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed)
+  const events = all.filter(
+    (e) => search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]),
+  )
+  const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed || found.has(e.id))
 
   // Newest events are at the bottom, so keep the view there.
   useLayoutEffect(() => {
     scroller.current.scrollTop = scroller.current.scrollHeight
-  }, [level, kind, zone, needle, all])
+  }, [level, kind, zone, search, all])
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-x-4 px-6 py-4">
+      {/* Advanced search takes the whole first row and pushes the filters below it. Plain search
+          moves to its own row only when the window is too narrow for it. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 px-6 py-4">
         <div role="group" aria-label="Level" className="flex shrink-0 gap-1">
           {LEVELS.map((l) => (
             <button
@@ -150,20 +177,19 @@ export default function Logs() {
         >
           {expandAll ? 'Collapse all' : 'Expand all'}
         </button>
-        <label className="relative ml-auto block w-64 min-w-32 shrink">
-          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-grey" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            aria-label="Search logs"
-            className="w-full rounded-md border border-line bg-white py-1.5 pl-8 pr-2.5 text-sm outline-none focus:border-blue"
-          />
-        </label>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          advanced={advanced}
+          onToggle={() => setAdvanced(!advanced)}
+          error={result.error}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
-        <div ref={scroller} className="min-h-0 overflow-auto rounded-md border border-line bg-white">
+        {/* `relative` keeps the absolutely placed sr-only labels inside the scroller; without it they
+            stretch the page once rows are open. */}
+        <div ref={scroller} className="relative min-h-0 overflow-auto rounded-md border border-line bg-white">
           <table className="w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
             <thead>
               <tr>
@@ -244,7 +270,7 @@ export default function Logs() {
                           )}
                           <div className="space-y-px text-[13px]">
                             {steps.map((s) => (
-                              <Step key={s.index} step={s} zones={meta.zones} />
+                              <Step key={s.index} step={s} zones={meta.zones} found={found.get(e.id)?.has(s)} />
                             ))}
                           </div>
                           {steps.length < e.steps.length && (
