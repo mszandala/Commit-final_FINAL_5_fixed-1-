@@ -293,7 +293,7 @@ def stats():
 def _warm_up() -> None:
     """Ładuje model GLiNER w tle, żeby pierwsza wiadomość nie czekała na jego wczytanie (lub pobranie)."""
     try:
-        from security.gliner_detector import _load_model
+        from security.pii.gliner_detector import _load_model
         _load_model()
     except Exception as exc:
         logging.getLogger(__name__).warning("Nie udało się wczytać modelu PII: %s", exc)
