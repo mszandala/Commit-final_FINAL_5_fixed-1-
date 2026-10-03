@@ -124,9 +124,13 @@ def _soften(engine: CompanyPolicyEngine, role: str, text: str, verdict, public_o
 def _policy_check(point: str, verdict, softened: bool = False) -> None:
     """Zapisuje decyzję regulaminów w śladzie tury (bez treści — moduł ma też własny log z hashami)."""
     d = verdict.details
+    semantic = d.get("semantic") or {}
     audit.record("company_policy", "security", point=point, decision=verdict.decision,
                  rule_id=d.get("rule_id"), section=d.get("section"), violation=d.get("violation_type"),
-                 layer=d.get("layer"), detector_error=bool(d.get("detector_error")), softened=softened)
+                 layer=d.get("layer"), methods=d.get("methods"), detector_error=bool(d.get("detector_error")),
+                 softened=softened, reason=verdict.reason if verdict.decision != "pass" else None,
+                 classifier=({"category": semantic.get("category"), "confidence": semantic.get("confidence")}
+                             if semantic else None))
 
 
 @dataclass
@@ -261,7 +265,8 @@ class SecureToolGate:
         # Subagent dopisuje własne wywołania do `calls`, zanim to się skończy — trzymamy własny wpis.
         call = self.calls[-1]
         if refusal is not None:
-            audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist")
+            audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist",
+                         reason=call.get("reason"))
             self._report(call)
             return refusal
 
@@ -287,7 +292,7 @@ class SecureToolGate:
             verdict = engine.check_tool_call(self.conv.role, name, real_args)
             _policy_check("tool", verdict)
             if verdict.decision in ("block", "redact"):
-                return self._deny_by_policy(name, args, verdict,
+                return self._deny_by_policy(call, verdict,
                                             f"Access denied by company policy: {verdict.reason} Do not call this "
                                             "tool again with this data. Tell the user the request is not allowed.")
 
@@ -298,7 +303,7 @@ class SecureToolGate:
                                         public_only=name in PUBLIC_SOURCE_TOOLS)
             _policy_check("retrieval", verdict, softened)
             if verdict.decision == "block":
-                return self._deny_by_policy(name, args, verdict,
+                return self._deny_by_policy(call, verdict,
                                             f"Tool result withheld by company policy: {verdict.reason}")
             result = verdict.details.get("redacted_text") or result
         masked, scan, stats = self._mask_result(name, result)
@@ -311,11 +316,11 @@ class SecureToolGate:
         self._report(call)
         return masked
 
-    def _deny_by_policy(self, name: str, args: dict, verdict, message: str) -> str:
-        self.calls[-1].update(allowed=False, stage=verdict.stage, reason=verdict.reason)
-        audit.record("tool_call", "security", tool=name, allowed=False, args=args,
+    def _deny_by_policy(self, call: dict, verdict, message: str) -> str:
+        call.update(allowed=False, stage=verdict.stage, reason=verdict.reason)
+        audit.record("tool_call", "security", tool=call["tool"], allowed=False, args=call["args"],
                      stage=verdict.stage, reason=verdict.reason)
-        self._report(name)
+        self._report(call)
         return message
 
     def _mask_result(self, name: str, result: str) -> tuple[str, str, dict]:
@@ -465,6 +470,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     flagged = guard.decision == "warn"
     guard_blocks = guard.is_blocked or (flagged and SETTINGS.guard_mode == "block")
     audit.record("prompt_guard", "security", decision=guard.decision, blocked=guard_blocks,
+                 reason=_clean(guard.reason) if flagged or guard_blocks else None,
                  details={k: v for k, v in guard.details.items() if k != "warning"})
     if guard_blocks:
         reason = _clean(guard.reason)

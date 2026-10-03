@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import pipeline
+from api.steps import build_steps, turn_level
+from audit import logger as audit_logger
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -103,6 +105,15 @@ _events: list[dict] = []
 _events_lock = threading.Lock()
 
 
+def load_events() -> None:
+    """Wczytuje log z pliku (start serwera), żeby przetrwał restart."""
+    rows = audit_logger.load_turns()
+    for row in rows:
+        row["time"] = datetime.fromisoformat(row["time"])
+    with _events_lock:
+        _events[:] = rows
+
+
 def _summarize(result: Optional[pipeline.TurnResult], verdict: Optional[dict], tools: list) -> tuple[str, Optional[str], str]:
     """Jeden wiersz logu na turę: (decyzja, etap, powód).
 
@@ -138,9 +149,13 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
     tools = result.tool_calls if result else []
     decision, stage, reason = _summarize(result, verdict, tools)
     cfg = ROLES[role]
+    # Tura zatrzymana przez budżet nie wchodzi do pipeline'u, więc jej jedyny krok powstaje tutaj.
+    trail = result.events if result else (
+        [{"type": "budget", "zone": "security", "reason": verdict["reason"]}] if verdict else [])
+    steps = build_steps(trail)
     with _events_lock:
         event = {
-            "id": len(_events) + 1,
+            "id": (_events[-1]["id"] + 1) if _events else 1,
             "time": datetime.now(timezone.utc),
             "user": cfg["user"],
             "role": cfg["label"],
@@ -150,6 +165,8 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "stage": stage,
             "control": CONTROLS.get(stage, stage or ""),
             "reason": reason,
+            "level": turn_level(steps, decision),
+            "step_count": len(steps),
             "masked_for_model": result.masked_for_model if result else [],
             "model": next((e.get("model") for e in result.events
                            if e["type"] == "llm_call" and e["zone"] == "chatbot"), None) if result else None,
@@ -158,9 +175,11 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "masked_prompt": result.masked_prompt if result else "",
             "tools": tools,
             "leaks_to_chatbot": result.leaks_to_chatbot if result else 0,
-            "trail": result.events if result else [],
+            "trail": trail,
+            "steps": steps,
         }
         _events.append(event)
+        audit_logger.append_turn({**event, "time": event["time"].isoformat()})
         return event
 
 
@@ -173,7 +192,7 @@ def list_events(after_id: Optional[int] = None, limit: int = 200, decision: Opti
 
 def get_event(event_id: int) -> Optional[dict]:
     with _events_lock:
-        return _events[event_id - 1] if 0 < event_id <= len(_events) else None
+        return next((e for e in _events if e["id"] == event_id), None)
 
 
 def reset_state() -> None:

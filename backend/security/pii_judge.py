@@ -25,19 +25,28 @@ def judge_entities(role: str, prompt: str, entities: list[dict]) -> list[str]:
         entities=listing,
     )
     decisions = ["mask"] * len(entities)
+    reasons = [""] * len(entities)
     try:
         reply = llm_client.chat([{"role": "user", "content": message}], zone="security", purpose="pii_judge")
         match = re.search(r"\{.*\}", reply.content or "", re.DOTALL)
         parsed = json.loads(match.group(0)) if match else {}
         for i in range(len(entities)):
-            if str(parsed.get(str(i + 1), "")).strip().lower() == "send":
+            # Sędzia odpowiada {"decision", "reason"}; sam napis "send"/"mask" też jest przyjmowany.
+            answer = parsed.get(str(i + 1), "")
+            if isinstance(answer, dict):
+                reasons[i] = str(answer.get("reason", ""))[:200]
+                answer = answer.get("decision", "")
+            if str(answer).strip().lower() == "send":
                 decisions[i] = "send"
         error = None
     except Exception as exc:
         error = type(exc).__name__
+    # Uzasadnienie może powtarzać ocenianą wartość, więc przed zapisem do logu zamieniamy ją na typ.
+    for e in entities:
+        reasons = [r.replace(e["text"], f"[{e['type']}]") for r in reasons]
     audit.record(
         "pii_judge", "security",
-        decisions=[{"type": e["type"], "decision": d} for e, d in zip(entities, decisions)],
+        decisions=[{"type": e["type"], "decision": d, "reason": r} for e, d, r in zip(entities, decisions, reasons)],
         error=error,
     )
     return decisions

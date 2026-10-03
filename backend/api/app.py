@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 import pipeline
 from api import schemas, state
+from api.steps import LEVELS, STEP_KINDS, ZONES
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -145,6 +146,8 @@ def meta():
         blocked_pii=GLOBAL_BLOCKED_PII,
         pii_labels=PII_LABELS,
         controls=CONTROLS,
+        step_kinds=STEP_KINDS,
+        zones=ZONES,
         stages=STAGES,
         examples=EXAMPLES,
     )
@@ -268,8 +271,14 @@ def end_conversation(conversation_id: str):
             summary="Wiersze logu, najstarsze pierwsze. Bez afterId: ostatnie `limit` wierszy; z afterId: kolejne po nim")
 def events(after_id: Optional[int] = Query(None, alias="afterId", ge=0),
            limit: int = Query(200, ge=1, le=1000),
-           decision: Optional[schemas.EventDecision] = None):
-    return state.list_events(after_id, limit, decision)
+           decision: Optional[schemas.EventDecision] = None,
+           min_level: Optional[schemas.Level] = Query(None, alias="minLevel",
+                                                      description="warn = ostrzeżenia i blokady, block = tylko blokady"),
+           steps: bool = Query(False, description="Dołącz kroki każdej tury")):
+    rows = state.list_events(after_id, limit, decision)
+    if min_level:
+        rows = [e for e in rows if LEVELS.index(e["level"]) >= LEVELS.index(min_level)]
+    return rows if steps else [{**e, "steps": None} for e in rows]
 
 
 @router.get("/events/{event_id}", response_model=schemas.EventDetail, tags=["logs"],
@@ -304,6 +313,7 @@ def _warm_up() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    state.load_events()
     threading.Thread(target=_warm_up, daemon=True).start()
     yield
 

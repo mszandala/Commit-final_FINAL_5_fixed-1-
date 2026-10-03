@@ -1,31 +1,46 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Search } from 'lucide-react'
+import { Fragment, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { ChevronRight, Search } from 'lucide-react'
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
+import { useMeta } from '../meta'
 
-const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked', 'Error']
+// The backend grades every turn and every step: info (nothing to report), warn (flagged or
+// data hidden) and block. A turn takes the highest level among its steps.
+const RANK = { info: 0, warn: 1, block: 2 }
+const LEVELS = [
+  { id: 'info', label: 'All' },
+  { id: 'warn', label: 'Warnings and blocks' },
+  { id: 'block', label: 'Blocks only' },
+]
+const LEVEL_NAMES = { info: 'OK', warn: 'Warning', block: 'Blocked' }
 
-// Left-edge bar marks the decision; the row tints on hover. Screen readers and the
-// time tooltip get the decision as text.
+// Left-edge bar marks the level; the row tints on hover. Screen readers and tooltips get it as text.
 const BARS = {
-  Allowed: 'shadow-[inset_4px_0_0_var(--color-green)]',
-  Redacted: 'shadow-[inset_4px_0_0_var(--color-amber)]',
-  Blocked: 'shadow-[inset_4px_0_0_var(--color-red)]',
-  Error: 'shadow-[inset_4px_0_0_var(--color-grey)]',
+  info: 'shadow-[inset_4px_0_0_var(--color-green)]',
+  warn: 'shadow-[inset_4px_0_0_var(--color-amber)]',
+  block: 'shadow-[inset_4px_0_0_var(--color-red)]',
 }
 const TINTS = {
-  Allowed: 'hover:bg-green/10',
-  Redacted: 'hover:bg-amber/10',
-  Blocked: 'hover:bg-red/10',
-  Error: 'hover:bg-grey/10',
+  info: 'hover:bg-green/10',
+  warn: 'hover:bg-amber/10',
+  block: 'hover:bg-red/10',
+}
+const DOTS = { info: 'bg-green', warn: 'bg-amber', block: 'bg-red' }
+const STEP_TEXT = { info: 'text-grey', warn: 'text-amber-text', block: 'text-red-text' }
+const ZONE_TAGS = {
+  security: 'bg-violet/20',
+  chatbot: 'bg-blue-light/60',
+  local: 'bg-teal/25',
 }
 
 const COLUMNS = [
+  { label: '' },
   { label: 'Time' },
   { label: 'User' },
   { label: 'Role' },
   { label: 'Control' },
   { label: 'Reason' },
+  { label: 'Steps', numeric: true },
   { label: 'Tokens', numeric: true },
   { label: 'Latency', numeric: true },
 ]
@@ -33,42 +48,108 @@ const COLUMNS = [
 const timeOf = (d) => d.toLocaleTimeString('en-GB')
 const dateOf = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 
+function Select({ label, value, onChange, options }) {
+  return (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded-md border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-blue"
+    >
+      <option value="all">{label}: all</option>
+      {Object.entries(options).map(([id, name]) => (
+        <option key={id} value={id}>
+          {name}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function Step({ step, zones }) {
+  return (
+    <details className="group">
+      <summary
+        className={`flex list-none items-baseline gap-2.5 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${TINTS[step.level]}`}
+        title={LEVEL_NAMES[step.level]}
+      >
+        <span className="sr-only">{LEVEL_NAMES[step.level]}: </span>
+        <span className="w-32 shrink-0 text-ink">{step.label}</span>
+        <span className={`w-24 shrink-0 rounded-sm px-1.5 py-px text-center text-xs text-ink ${ZONE_TAGS[step.zone] ?? 'bg-page'}`}>
+          {zones[step.zone] ?? step.zone}
+        </span>
+        <span className={`min-w-0 flex-1 break-words ${STEP_TEXT[step.level]}`}>{step.summary}</span>
+        <span className="shrink-0 text-grey">{formatNumber(step.durationMs)} ms</span>
+        <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
+      </summary>
+      <pre className="mb-1.5 ml-3 mt-1 whitespace-pre-wrap break-words rounded-md bg-page px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink">
+        {JSON.stringify(step.details, null, 2)}
+      </pre>
+    </details>
+  )
+}
+
 export default function Logs() {
-  const [decision, setDecision] = useState('All')
+  const meta = useMeta()
+  const [level, setLevel] = useState('info')
+  const [kind, setKind] = useState('all')
+  const [zone, setZone] = useState('all')
   const [query, setQuery] = useState('')
+  // Turns opened or closed by hand; the rest follow `expandAll`.
+  const [toggled, setToggled] = useState({})
+  const [expandAll, setExpandAll] = useState(false)
 
   const scroller = useRef(null)
 
   const needle = query.trim().toLowerCase()
   const all = useSyncExternalStore(subscribeEvents, getEvents)
-  const events = all.filter(
-    (e) =>
-      (decision === 'All' || e.decision === decision) &&
-      (!needle || `${e.user} ${e.control} ${e.reason}`.toLowerCase().includes(needle)),
-  )
+
+  // With a step type or zone chosen, a turn is listed when one of its steps matches, and only
+  // those steps are shown under it.
+  const narrowed = kind !== 'all' || zone !== 'all'
+  const stepMatches = (s) =>
+    RANK[s.level] >= RANK[level] && (kind === 'all' || s.kind === kind) && (zone === 'all' || s.zone === zone)
+  const events = all.filter((e) => {
+    const text = `${e.user} ${e.role} ${e.control} ${e.reason} ${e.steps.map((s) => s.summary).join(' ')}`
+    if (needle && !text.toLowerCase().includes(needle)) return false
+    return narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]
+  })
+  const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed)
 
   // Newest events are at the bottom, so keep the view there.
   useLayoutEffect(() => {
     scroller.current.scrollTop = scroller.current.scrollHeight
-  }, [decision, needle, all])
+  }, [level, kind, zone, needle, all])
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-4 px-6 py-4">
-        <div role="group" aria-label="Decision" className="flex gap-1">
-          {DECISIONS.map((d) => (
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4">
+        <div role="group" aria-label="Level" className="flex gap-1">
+          {LEVELS.map((l) => (
             <button
-              key={d}
-              aria-pressed={decision === d}
-              onClick={() => setDecision(d)}
+              key={l.id}
+              aria-pressed={level === l.id}
+              onClick={() => setLevel(l.id)}
               className={`rounded-md px-2.5 py-1 text-sm ${
-                decision === d ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
+                level === l.id ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
               }`}
             >
-              {d}
+              {l.label}
             </button>
           ))}
         </div>
+        <Select label="Step" value={kind} onChange={setKind} options={meta.stepKinds} />
+        <Select label="Zone" value={zone} onChange={setZone} options={meta.zones} />
+        <button
+          aria-pressed={expandAll}
+          onClick={() => {
+            setExpandAll(!expandAll)
+            setToggled({})
+          }}
+          className={`rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
+        >
+          {expandAll ? 'Collapse all' : 'Expand all'}
+        </button>
         <label className="relative ml-auto block w-64">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-grey" />
           <input
@@ -86,10 +167,10 @@ export default function Logs() {
           <table className="w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
             <thead>
               <tr>
-                {COLUMNS.map((c) => (
+                {COLUMNS.map((c, i) => (
                   <th
-                    key={c.label}
-                    className={`sticky top-0 border-b border-line bg-white px-2.5 py-2 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
+                    key={i}
+                    className={`sticky top-0 z-10 border-b border-line bg-white px-2.5 py-2 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
                       c.numeric ? 'text-right' : 'text-left'
                     }`}
                   >
@@ -99,34 +180,84 @@ export default function Logs() {
               </tr>
             </thead>
             <tbody>
-              {events.map((e) => (
-                <tr key={e.id} className={TINTS[e.decision]}>
-                  <td
-                    className={`whitespace-nowrap border-b border-line px-2.5 py-1 pl-4 ${BARS[e.decision]}`}
-                    title={`${e.decision}, ${e.time.toLocaleString('en-GB')}`}
-                  >
-                    <span className="sr-only">{e.decision}, </span>
-                    <span className="mr-2 text-grey">{dateOf(e.time)}</span>
-                    {timeOf(e.time)}
-                  </td>
-                  <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.user}>
-                    {e.user}
-                  </td>
-                  <td className="max-w-24 truncate border-b border-line px-2.5 py-1 text-grey" title={e.role}>
-                    {e.role}
-                  </td>
-                  <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.control}>
-                    {e.control || <span className="text-grey">&ndash;</span>}
-                  </td>
-                  <td className="border-b border-line px-2.5 py-1 text-grey">
-                    <div className="line-clamp-2 max-w-60" title={e.reason}>
-                      {e.reason}
-                    </div>
-                  </td>
-                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
-                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latencyMs)} ms</td>
-                </tr>
-              ))}
+              {events.map((e) => {
+                const open = isOpen(e)
+                const steps = narrowed || level !== 'info' ? e.steps.filter(stepMatches) : e.steps
+                return (
+                  <Fragment key={e.id}>
+                    <tr
+                      className={`cursor-pointer ${TINTS[e.level]}`}
+                      onClick={() => setToggled({ ...toggled, [e.id]: !open })}
+                    >
+                      <td className={`border-b border-line py-1 pl-4 pr-0 ${BARS[e.level]}`}>
+                        <button
+                          aria-expanded={open}
+                          aria-label={`${open ? 'Hide' : 'Show'} steps of turn ${e.id}`}
+                          className="grid place-items-center text-grey"
+                        >
+                          <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+                        </button>
+                      </td>
+                      <td
+                        className="whitespace-nowrap border-b border-line px-2.5 py-1"
+                        title={`${LEVEL_NAMES[e.level]} (${e.decision}), ${e.time.toLocaleString('en-GB')}`}
+                      >
+                        <span className="sr-only">{LEVEL_NAMES[e.level]}, </span>
+                        <span className="mr-2 text-grey">{dateOf(e.time)}</span>
+                        {timeOf(e.time)}
+                      </td>
+                      <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.user}>
+                        {e.user}
+                      </td>
+                      <td className="max-w-24 truncate border-b border-line px-2.5 py-1 text-grey" title={e.role}>
+                        {e.role}
+                      </td>
+                      <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.control}>
+                        {e.control || <span className="text-grey">&ndash;</span>}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-1 text-grey">
+                        <div className="line-clamp-2 max-w-60" title={e.reason}>
+                          {e.reason}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">
+                        <span className="inline-flex items-center gap-1.5">
+                          {['block', 'warn'].map(
+                            (l) =>
+                              e.steps.some((s) => s.level === l) && (
+                                <span key={l} className={`size-1.5 rounded-full ${DOTS[l]}`} title={LEVEL_NAMES[l]} />
+                              ),
+                          )}
+                          {e.stepCount}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
+                      <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latencyMs)} ms</td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={COLUMNS.length} className="border-b border-line bg-page/60 py-2 pl-9 pr-4">
+                          {e.maskedPrompt && (
+                            <p className="mb-1.5 pl-3 text-[13px] text-grey">
+                              Sent to the model: <span className="font-mono text-[12.5px] text-ink">{e.maskedPrompt}</span>
+                            </p>
+                          )}
+                          <div className="space-y-px text-[13px]">
+                            {steps.map((s) => (
+                              <Step key={s.index} step={s} zones={meta.zones} />
+                            ))}
+                          </div>
+                          {steps.length < e.steps.length && (
+                            <p className="mt-1.5 pl-3 text-[13px] text-grey">
+                              {steps.length} of {e.steps.length} steps match the filters
+                            </p>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
           {events.length === 0 && <p className="py-10 text-center text-grey">No matching events</p>}
