@@ -32,8 +32,10 @@ class ToolGate:
         self.calls.append(call)
         if allowed:
             return None
+        allowed_tools = ROLES.get(self.role, {}).get("allowed_tools", [])
+        tools_str = ", ".join(allowed_tools) if allowed_tools else "none"
         return (
-            f"Access denied: tool '{name}' is not available for the current user's role. "
-            "Do not call it again. Continue without it and tell the user "
-            "that this data is not available for their role."
+            f"Access denied: tool '{name}' is not authorized for the user's role ('{self.role}'). "
+            f"Authorized tools for this role are: [{tools_str}]. "
+            f"Do not call '{name}' again. If an authorized tool can answer the user's query, call that tool instead."
         )

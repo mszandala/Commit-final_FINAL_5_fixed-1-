@@ -20,6 +20,7 @@ from config import (
     DEFAULT_TOOL_RESULT_SCAN,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
+    ROLES,
     SETTINGS,
     TOOL_RESULT_SCAN,
 )
@@ -39,6 +40,18 @@ MASKING_NOTE = (
     " and some table cells show [REDACTED]. Treat placeholders as opaque values: copy them exactly,"
     " never alter, translate or guess them. You may pass them to tools as arguments."
 )
+
+
+def _system_prompt(role: str) -> str:
+    allowed = ROLES.get(role, {}).get("allowed_tools", [])
+    tools_str = ", ".join(allowed) if allowed else "none"
+    role_note = (
+        f"\nUser's current role is: '{role}'. "
+        f"If you need to retrieve data or call tools, the ONLY tools authorized for this user's role are: [{tools_str}]. "
+        f"Do not attempt to call any unauthorized tools."
+    )
+    masking = MASKING_NOTE if SETTINGS.mask_pii else ""
+    return agent.SYSTEM + role_note + masking
 
 
 @dataclass
@@ -342,7 +355,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
 
     # 3. Chatbot z bramką narzędzi
     stage(STAGE_MODEL)
-    history = conv.history or [{"role": "system", "content": agent.SYSTEM + (MASKING_NOTE if SETTINGS.mask_pii else "")}]
+    history = conv.history or [{"role": "system", "content": _system_prompt(conv.role)}]
     try:
         raw_reply, new_history = agent.run_agent(masked_prompt, history=history, tool_gate=gate)
     except agent.ResponseBlocked as exc:
