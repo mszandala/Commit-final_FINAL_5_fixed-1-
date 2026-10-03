@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Search } from 'lucide-react'
-import { getEvents, subscribeEvents } from '../mock/events'
+import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
 
-const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked']
+const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked', 'Error']
 
 // Left-edge bar marks the decision; the row tints on hover. Screen readers and the
 // time tooltip get the decision as text.
@@ -11,11 +11,13 @@ const BARS = {
   Allowed: 'shadow-[inset_4px_0_0_var(--color-green)]',
   Redacted: 'shadow-[inset_4px_0_0_var(--color-amber)]',
   Blocked: 'shadow-[inset_4px_0_0_var(--color-red)]',
+  Error: 'shadow-[inset_4px_0_0_var(--color-grey)]',
 }
 const TINTS = {
   Allowed: 'hover:bg-green/10',
   Redacted: 'hover:bg-amber/10',
   Blocked: 'hover:bg-red/10',
+  Error: 'hover:bg-grey/10',
 }
 
 const COLUMNS = [
@@ -122,7 +124,7 @@ export default function Logs() {
                     </div>
                   </td>
                   <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
-                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latency)} ms</td>
+                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latencyMs)} ms</td>
                 </tr>
               ))}
             </tbody>

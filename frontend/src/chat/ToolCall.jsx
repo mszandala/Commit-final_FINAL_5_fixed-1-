@@ -11,7 +11,7 @@ import {
   SquareTerminal,
   Users,
 } from 'lucide-react'
-import { CONTROLS } from '../mock/config'
+import { useMeta } from '../meta'
 import StatusTag from '../ui/StatusTag'
 
 // Project files are named owner_repo; people know them by the repo.
@@ -42,6 +42,7 @@ const rawCall = ({ tool, args }) =>
     .join(', ')})`
 
 export default function ToolCall({ call }) {
+  const { controls } = useMeta()
   const { icon: Icon, label } = TOOLS[call.tool] ?? { icon: SquareTerminal, label: () => call.tool }
 
   return (
@@ -55,7 +56,7 @@ export default function ToolCall({ call }) {
       <div className="mt-1.5 space-y-1.5">
         {!call.allowed && (
           <p className="text-ink">
-            {CONTROLS[call.stage]}: {call.reason}
+            {controls[call.stage] ?? call.stage}: {call.reason}
           </p>
         )}
         <pre className="whitespace-pre-wrap break-words rounded-md bg-page px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink">

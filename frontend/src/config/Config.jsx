@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Eye, EyeOff } from 'lucide-react'
-import { DATA_ACCESS, MODELS, PII_TAGS, SENSITIVITY, getConfig } from '../mock/config'
+import { useMeta } from '../meta'
 import Button from '../ui/Button'
 import Dropdown from '../ui/Dropdown'
 
@@ -14,8 +14,12 @@ const GUARD_MODES = [
   { id: 'block', label: 'Block', hint: 'Stops the request before it reaches the model' },
 ]
 
-const AREA_IDS = DATA_ACCESS.map((a) => a.id)
-const PII_IDS = Object.keys(PII_TAGS)
+// Hints for the levels in GET /meta -> sensitivityLevels.
+const SENSITIVITY_HINTS = {
+  low: 'Flags only clear-cut matches, fewer false alarms',
+  balanced: 'Recommended for everyday use',
+  high: 'Flags anything that looks like personal data',
+}
 
 // Rebuilt in a fixed order, so ticking something off and on again doesn't count as a change.
 const toggle = (list, item, order) => order.filter((x) => (x === item) !== list.includes(x))
@@ -55,11 +59,19 @@ function Checkbox({ checked, onChange, label }) {
   )
 }
 
-export default function Config({ config, dirty, onChange, onSave }) {
+export default function Config({ config, dirty, error, onChange, onReset, onSave }) {
+  const { models: MODELS, sensitivityLevels: SENSITIVITY, dataAccess: DATA_ACCESS, piiTags, piiLabels } = useMeta()
   const [showKey, setShowKey] = useState(false)
   const set = (key, value) => onChange({ ...config, [key]: value })
 
-  const level = SENSITIVITY[config.sensitivity]
+  const AREA_IDS = DATA_ACCESS.map((a) => a.id)
+  const PII_IDS = piiTags
+
+  // `sensitivity` is null when the threshold matches no level; the slider then sits on the nearest one.
+  const distance = (l) => Math.abs(l.threshold - config.piiThreshold)
+  const found = SENSITIVITY.findIndex((l) => l.id === config.sensitivity)
+  const index = found >= 0 ? found : SENSITIVITY.indexOf(SENSITIVITY.reduce((a, b) => (distance(b) < distance(a) ? b : a)))
+  const level = SENSITIVITY[index]
 
   function setProvider(provider) {
     // Keep the model valid for the provider just picked.
@@ -96,6 +108,7 @@ export default function Config({ config, dirty, onChange, onSave }) {
                 <input
                   type={showKey ? 'text' : 'password'}
                   value={config.apiKey}
+                  placeholder={config.apiKeySet ? `Saved key ending in ${config.apiKeyHint}` : ''}
                   onChange={(e) => set('apiKey', e.target.value)}
                   aria-label="OpenRouter API key"
                   spellCheck={false}
@@ -119,7 +132,7 @@ export default function Config({ config, dirty, onChange, onSave }) {
               label="Model"
               trigger={
                 <>
-                  {MODELS.find((m) => m.id === config.model).label}
+                  {MODELS.find((m) => m.id === config.model)?.label ?? config.model}
                   <ChevronDown size={16} className="text-grey" />
                 </>
               }
@@ -154,20 +167,23 @@ export default function Config({ config, dirty, onChange, onSave }) {
                 min={0}
                 max={SENSITIVITY.length - 1}
                 step={1}
-                value={config.sensitivity}
-                onChange={(e) => set('sensitivity', Number(e.target.value))}
+                value={index}
+                onChange={(e) => {
+                  const next = SENSITIVITY[Number(e.target.value)]
+                  onChange({ ...config, sensitivity: next.id, piiThreshold: next.threshold })
+                }}
                 aria-label="PII sensitivity"
                 aria-valuetext={level.label}
                 className="block h-4 w-full cursor-pointer appearance-none bg-transparent [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-navy [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-md [&::-moz-range-track]:bg-blue-light/60 [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-md [&::-webkit-slider-runnable-track]:bg-blue-light/60 [&::-webkit-slider-thumb]:-mt-1.5 [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-navy"
               />
               <div className="mt-1.5 flex justify-between text-[13px]">
                 {SENSITIVITY.map((s, i) => (
-                  <span key={s.label} className={i === config.sensitivity ? 'text-ink' : 'text-grey'}>
+                  <span key={s.id} className={i === index ? 'text-ink' : 'text-grey'}>
                     {s.label}
                   </span>
                 ))}
               </div>
-              <p className="mt-2 text-sm text-grey">{level.hint}</p>
+              <p className="mt-2 text-sm text-grey">{SENSITIVITY_HINTS[level.id]}</p>
             </div>
           </Row>
           <Row label="Prompt guard">
@@ -254,7 +270,7 @@ export default function Config({ config, dirty, onChange, onSave }) {
                       trigger={
                         <>
                           <span className={r.pii.length ? '' : 'text-grey'}>
-                            {r.pii.length ? r.pii.map((tag) => PII_TAGS[tag]).join(', ') : 'None'}
+                            {r.pii.length ? r.pii.map((tag) => piiLabels[tag] ?? tag).join(', ') : 'None'}
                           </span>
                           <ChevronDown size={14} className="mt-[3px] shrink-0 text-grey" />
                         </>
@@ -269,7 +285,7 @@ export default function Config({ config, dirty, onChange, onSave }) {
                                   checked={r.pii.includes(tag)}
                                   onChange={() => updateRole(r.id, { pii: toggle(r.pii, tag, PII_IDS) })}
                                 />
-                                {PII_TAGS[tag]}
+                                {piiLabels[tag] ?? tag}
                               </label>
                             </li>
                           ))}
@@ -283,8 +299,9 @@ export default function Config({ config, dirty, onChange, onSave }) {
           </table>
         </Section>
 
-        <div className="flex justify-end gap-2">
-          <Button onClick={() => onChange(getConfig())}>Reset to defaults</Button>
+        <div className="flex items-center justify-end gap-2">
+          {error && <p className="mr-auto text-sm text-red-text">{error}</p>}
+          <Button onClick={onReset}>Reset to defaults</Button>
           <Button variant="primary" disabled={!dirty} onClick={onSave}>
             Save changes
           </Button>

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Gauge } from 'lucide-react'
-import { USERS } from '../mock/data'
-import { sendMessage } from '../mock/chat'
+import { endConversation, streamChat } from '../api'
+import { refreshEvents } from '../events'
+import { useMeta } from '../meta'
 import ChatItem from './ChatItem'
 import Composer from './Composer'
 import Examples from './Examples'
@@ -11,21 +12,22 @@ const BUDGET_WARNING = 0.8
 
 let nextId = 1
 
-export default function Chat({ config }) {
+// `people` is GET /roles: each role with its example user and today's token budget.
+export default function Chat({ people }) {
+  const meta = useMeta()
   const [roleId, setRoleId] = useState('basic_user')
   const [items, setItems] = useState([])
   // Switching user starts a new session; the divider goes in with that session's first message.
   const [sessionStarted, setSessionStarted] = useState(false)
+  const conversation = useRef(null)
   // Stage and tool calls of the request in flight.
   const [pending, setPending] = useState(null)
   const [failed, setFailed] = useState(null)
-  // Tokens used today, per user; starts from the mock figures.
-  const [usage, setUsage] = useState(() => Object.fromEntries(Object.entries(USERS).map(([id, u]) => [id, u.used])))
+  const [budgets, setBudgets] = useState(() => Object.fromEntries(people.map((p) => [p.id, p.budget])))
   const listRef = useRef(null)
 
-  const user = USERS[roleId]
-  const role = config.roles.find((r) => r.id === roleId)
-  const account = { used: usage[roleId], limit: user.budget }
+  const person = people.find((p) => p.id === roleId)
+  const account = budgets[roleId]
   const share = account.used / account.limit
 
   useEffect(() => {
@@ -33,38 +35,50 @@ export default function Chat({ config }) {
   }, [items, pending, failed])
 
   function switchUser(next) {
+    if (conversation.current) endConversation(conversation.current).catch(() => {})
+    conversation.current = null
     setRoleId(next)
     setSessionStarted(false)
     setFailed(null)
   }
 
-  async function send(text, files) {
+  async function send(text) {
     setFailed(null)
-    setPending({ stage: '', tools: [] })
+    const tools = []
+    setPending({ stage: '', tools })
     try {
-      const result = await sendMessage({ text, files, user, used: usage[roleId], role, config }, setPending)
-      setUsage((prev) => ({ ...prev, [roleId]: prev[roleId] + result.tokens }))
+      const result = await streamChat(
+        { roleId, message: text, conversationId: conversation.current },
+        (kind, data) => {
+          if (kind === 'tool') tools.push(data)
+          setPending((prev) => ({ stage: kind === 'stage' ? meta.stages[data.stage] : prev.stage, tools: [...tools] }))
+        },
+      )
+      conversation.current = result.conversationId
+      setBudgets((prev) => ({ ...prev, [roleId]: result.budget }))
       setItems((prev) => [...prev, { id: nextId++, kind: 'reply', ...result }])
-    } catch {
-      setFailed({ text, files })
+    } catch (e) {
+      // status 0: the request never got an answer.
+      setFailed({ text, status: e.status ?? 0 })
     } finally {
       setPending(null)
+      refreshEvents()
     }
   }
 
   function submit(text, files = []) {
     const attached = files.map(({ name, size }) => ({ name, size }))
     const added = [{ id: nextId++, kind: 'user', text, files: attached }]
-    if (!sessionStarted) added.unshift({ id: nextId++, kind: 'session', name: user.name, role: role.label })
+    if (!sessionStarted) added.unshift({ id: nextId++, kind: 'session', name: person.user, role: person.label })
     setSessionStarted(true)
     setItems((prev) => [...prev, ...added])
-    send(text, attached)
+    send(text)
   }
 
   return (
     <section className="flex h-full flex-col bg-white">
       <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
-        <UserMenu roles={config.roles} roleId={roleId} account={account} disabled={!!pending} onSwitch={switchUser} />
+        <UserMenu people={people} roleId={roleId} account={account} disabled={!!pending} onSwitch={switchUser} />
       </header>
 
       <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
@@ -72,7 +86,7 @@ export default function Chat({ config }) {
           <ChatItem key={item.id} item={item} />
         ))}
         {pending && <ChatItem item={{ kind: 'pending', ...pending }} />}
-        {failed && <ChatItem item={{ kind: 'error' }} onRetry={() => send(failed.text, failed.files)} />}
+        {failed && <ChatItem item={{ kind: 'error', status: failed.status }} onRetry={() => send(failed.text)} />}
       </div>
 
       <footer className="shrink-0 space-y-2.5 border-t border-line px-5 pt-3 pb-5">

@@ -1,25 +1,24 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { REDACTED_PII } from '../mock/config'
+import { useMeta } from '../meta'
 
-// The backend replaces redacted values with [TYPE]; only known types become tags.
-const MARKER = new RegExp(`\\[(${Object.keys(REDACTED_PII).join('|')})\\]`)
-
-const tag = (type) => ({
+const tag = (label) => ({
   type: 'element',
   tagName: 'span',
   properties: { className: 'rounded-sm bg-amber/25 px-1 py-px text-xs font-semibold uppercase tracking-wide' },
-  children: [{ type: 'text', value: REDACTED_PII[type] }],
+  children: [{ type: 'text', value: label }],
 })
 
-function rehypeRedactions() {
+// The backend replaces hidden values with [TYPE]; only types in GET /meta -> piiLabels become tags.
+function rehypeRedactions({ labels }) {
+  const MARKER = new RegExp(`\\[(${Object.keys(labels).join('|')})\\]`)
   const walk = (node) => {
     node.children = node.children.flatMap((child) => {
       if (child.children) walk(child)
       if (child.type !== 'text') return [child]
       return child.value
         .split(MARKER)
-        .map((part, i) => (i % 2 ? tag(part) : { type: 'text', value: part }))
+        .map((part, i) => (i % 2 ? tag(labels[part]) : { type: 'text', value: part }))
         .filter((n) => n.type !== 'text' || n.value)
     })
   }
@@ -66,9 +65,11 @@ const components = {
 }
 
 export default function Markdown({ text }) {
+  const { piiLabels } = useMeta()
+
   return (
     <div className="min-w-0 cursor-text space-y-3 leading-relaxed">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRedactions]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeRedactions, { labels: piiLabels }]]} components={components}>
         {text}
       </ReactMarkdown>
     </div>

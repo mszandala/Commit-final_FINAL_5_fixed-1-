@@ -1,5 +1,5 @@
 import { Ban, CloudOff, EyeOff, Flag, RotateCw } from 'lucide-react'
-import { CONTROLS } from '../mock/config'
+import { useMeta } from '../meta'
 import Button from '../ui/Button'
 import Notice from '../ui/Notice'
 import Attachment from './Attachment'
@@ -17,6 +17,8 @@ const VERDICTS = {
 const midSentence = (name) => (/^[A-Z]{2}/.test(name) ? name : name[0].toLowerCase() + name.slice(1))
 
 export default function ChatItem({ item, onRetry }) {
+  const { controls } = useMeta()
+
   if (item.kind === 'session') {
     return (
       <div className="flex items-center gap-3 text-[13px] text-grey">
@@ -42,7 +44,8 @@ export default function ChatItem({ item, onRetry }) {
 
   if (item.kind === 'error') {
     return (
-      <Notice icon={CloudOff} title="Cannot reach the server">
+      // 502: the backend answered but the model call failed.
+      <Notice icon={CloudOff} title={item.status === 502 ? 'The model call failed' : 'Cannot reach the server'}>
         <Button size="sm" icon={RotateCw} onClick={onRetry} className="mt-2">
           Retry
         </Button>
@@ -61,10 +64,15 @@ export default function ChatItem({ item, onRetry }) {
       )}
       {item.kind === 'pending' && <Pending stage={item.stage} />}
       {item.text && <Markdown text={item.text} />}
-      {item.verdicts?.map((verdict, i) => {
+      {item.verdicts?.filter((verdict) => VERDICTS[verdict.decision]).map((verdict, i) => {
         const notice = VERDICTS[verdict.decision]
         return (
-          <Notice key={i} icon={notice.icon} tone={notice.tone} title={notice.title(midSentence(CONTROLS[verdict.stage]))}>
+          <Notice
+            key={i}
+            icon={notice.icon}
+            tone={notice.tone}
+            title={notice.title(midSentence(controls[verdict.stage] ?? verdict.stage))}
+          >
             <p className="text-ink">{verdict.reason}</p>
           </Notice>
         )

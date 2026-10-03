@@ -6,7 +6,8 @@ export default function Composer({ disabled, onSend }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState([])
   const picker = useRef(null)
-  const canSend = !disabled && (text.trim() || files.length > 0)
+  // Files aren't sent yet (the API takes text only), so a message needs text.
+  const canSend = !disabled && text.trim()
 
   function submit(e) {
     e.preventDefault()
@@ -54,9 +55,10 @@ export default function Composer({ disabled, onSend }) {
         <button
           type="button"
           aria-label="Attach files"
+          title="Mock: files aren't sent to the backend yet"
           disabled={disabled}
           onClick={() => picker.current.click()}
-          className="grid size-8 place-items-center rounded-md text-grey hover:bg-page hover:text-ink disabled:opacity-40"
+          className="grid size-8 place-items-center rounded-md text-red-text hover:bg-page disabled:opacity-40"
         >
           <Paperclip size={16} />
         </button>

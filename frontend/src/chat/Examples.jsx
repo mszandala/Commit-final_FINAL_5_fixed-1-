@@ -1,9 +1,11 @@
-import { getExamples } from '../mock/chat'
+import { useMeta } from '../meta'
 
 export default function Examples({ disabled, onPick }) {
+  const { examples } = useMeta()
+
   return (
     <ul className="-mx-2">
-      {getExamples().map((text) => (
+      {examples.map((text) => (
         <li key={text}>
           <button
             disabled={disabled}
