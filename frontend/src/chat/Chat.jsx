@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { CloudOff, Gauge, RotateCw } from 'lucide-react'
 import { ROLES } from '../mock/data'
 import { sendMessage } from '../mock/chat'
-import { formatNumber } from '../format'
 import Button from '../ui/Button'
 import Notice from '../ui/Notice'
 import ChatItem from './ChatItem'
@@ -77,8 +76,7 @@ export default function Chat() {
         {share >= BUDGET_WARNING && share < 1 && (
           <p className="flex items-center gap-1.5 text-[13px] text-amber-text">
             <Gauge size={14} />
-            {Math.round(share * 100)}% of today's budget used, {formatNumber(account.limit - account.used)} tokens
-            left
+            {Math.round(share * 100)}% of today's budget used
           </p>
         )}
         <Composer disabled={pending} onSend={submit} />

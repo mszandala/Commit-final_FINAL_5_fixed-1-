@@ -27,6 +27,8 @@
 body {
   @apply bg-page text-ink font-sans;
   font-size: 15px;
+  /* The text cursor is only for inputs, which set their own. */
+  cursor: default;
 }
 
 /* Tailwind v4 dropped the pointer cursor on buttons. */

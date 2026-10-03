@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import cat from '../assets/cat.jpg'
+import Logs from './Logs'
 
 const TABS = [
   { id: 'logs', label: 'Logs' },
@@ -7,7 +8,7 @@ const TABS = [
 ]
 
 export default function Dashboard() {
-  const [tab, setTab] = useState('logs')
+  const [tab, setTab] = useState('dashboard')
 
   return (
     <section className="flex h-full flex-col">
@@ -28,8 +29,14 @@ export default function Dashboard() {
           ))}
         </nav>
       </header>
-      <div role="tabpanel" className="grid flex-1 place-items-center overflow-y-auto p-6">
-        <img src={cat} alt="Cat" className="w-[480px]" />
+      <div role="tabpanel" className="min-h-0 flex-1">
+        {tab === 'logs' ? (
+          <Logs />
+        ) : (
+          <div className="grid h-full place-items-center p-6">
+            <img src={cat} alt="Cat" className="w-[480px]" />
+          </div>
+        )}
       </div>
     </section>
   )
