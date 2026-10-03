@@ -54,7 +54,7 @@ function Select({ label, value, onChange, options }) {
       aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-blue"
+      className="shrink-0 rounded-md border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-blue"
     >
       <option value="all">{label}: all</option>
       {Object.entries(options).map(([id, name]) => (
@@ -70,9 +70,10 @@ function Step({ step, zones }) {
   return (
     <details className="group">
       <summary
-        className={`flex list-none items-baseline gap-2.5 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${TINTS[step.level]}`}
+        className={`flex cursor-pointer list-none items-baseline gap-2 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${TINTS[step.level]}`}
         title={LEVEL_NAMES[step.level]}
       >
+        <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
         <span className="sr-only">{LEVEL_NAMES[step.level]}: </span>
         <span className="w-32 shrink-0 text-ink">{step.label}</span>
         <span className={`w-24 shrink-0 rounded-sm px-1.5 py-px text-center text-xs text-ink ${ZONE_TAGS[step.zone] ?? 'bg-page'}`}>
@@ -80,7 +81,6 @@ function Step({ step, zones }) {
         </span>
         <span className={`min-w-0 flex-1 break-words ${STEP_TEXT[step.level]}`}>{step.summary}</span>
         <span className="shrink-0 text-grey">{formatNumber(step.durationMs)} ms</span>
-        <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
       </summary>
       <pre className="mb-1.5 ml-3 mt-1 whitespace-pre-wrap break-words rounded-md bg-page px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink">
         {JSON.stringify(step.details, null, 2)}
@@ -123,14 +123,14 @@ export default function Logs() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4">
-        <div role="group" aria-label="Level" className="flex gap-1">
+      <div className="flex shrink-0 items-center gap-x-4 px-6 py-4">
+        <div role="group" aria-label="Level" className="flex shrink-0 gap-1">
           {LEVELS.map((l) => (
             <button
               key={l.id}
               aria-pressed={level === l.id}
               onClick={() => setLevel(l.id)}
-              className={`rounded-md px-2.5 py-1 text-sm ${
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${
                 level === l.id ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
               }`}
             >
@@ -146,11 +146,11 @@ export default function Logs() {
             setExpandAll(!expandAll)
             setToggled({})
           }}
-          className={`rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
+          className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
         >
           {expandAll ? 'Collapse all' : 'Expand all'}
         </button>
-        <label className="relative ml-auto block w-64">
+        <label className="relative ml-auto block w-64 min-w-32 shrink">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-grey" />
           <input
             value={query}
@@ -239,7 +239,7 @@ export default function Logs() {
                         <td colSpan={COLUMNS.length} className="border-b border-line bg-page/60 py-2 pl-9 pr-4">
                           {e.maskedPrompt && (
                             <p className="mb-1.5 pl-3 text-[13px] text-grey">
-                              Sent to the model: <span className="font-mono text-[12.5px] text-ink">{e.maskedPrompt}</span>
+                              Sent to the model:<span className="ml-1.5 font-mono text-[12.5px] text-ink">{e.maskedPrompt}</span>
                             </p>
                           )}
                           <div className="space-y-px text-[13px]">
