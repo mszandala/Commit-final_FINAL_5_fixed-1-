@@ -10,78 +10,15 @@ Użycie (z katalogu backend/):  python eval_refusals.py [-v]
 """
 import argparse
 import json
-import re
 import time
 from pathlib import Path
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from transformers import PreTrainedTokenizerFast
+
+from security.refusal_detector import EXEMPLARS, KEYWORDS, load_model, sentences
 
 DATASET = Path(__file__).parent / "tests" / "datasets" / "refusal_samples.json"
-MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
-
-KEYWORDS = re.compile(
-    r"i(?:'m| am) sorry|i cannot|i can't|i am unable|i'm unable|not authorized|do(?:es)? not have (?:the )?(?:authorization|permission|ability|access)"
-    r"|don't have (?:the )?(?:authorization|permission|ability|access|necessary)|only authorized"
-    r"|przykro mi|przepraszam, ale|nie mam uprawnień|nie mam dostępu|nie mam możliwości|nie mogę",
-    re.IGNORECASE,
-)
-
-# Ogólne wzorce odmów, pisane bez zaglądania do próbek; pogrupowane według przyczyny.
-EXEMPLARS = {
-    "no_permission": [
-        "I'm sorry, but I am not authorized to access that data.",
-        "I don't have permission to view this information for your role.",
-        "My access is limited to other data, so I can't retrieve this.",
-        "Przykro mi, ale nie mam uprawnień do tych danych.",
-        "Twoja rola nie ma dostępu do tych informacji.",
-        "Nie mam dostępu do tych danych.",
-    ],
-    "no_capability": [
-        "I don't have the ability to do that.",
-        "I can't perform this action; I can only answer questions using my tools.",
-        "Nie mam możliwości wykonania tej czynności.",
-        "Nie potrafię tego zrobić, mogę jedynie odpowiadać na pytania.",
-    ],
-    "conduct_rule": [
-        "I cannot make that decision; it must be made by an authorized person.",
-        "I can't help with this request because it would violate the rules I must follow.",
-        "Nie mogę podjąć takiej decyzji, musi ją podjąć upoważniona osoba.",
-        "Nie mogę spełnić tej prośby, bo naruszałaby obowiązujące zasady.",
-    ],
-    "generic": [
-        "I cannot fulfill this request.",
-        "I'm unable to help with that.",
-        "Nie mogę spełnić tej prośby.",
-        "Niestety nie mogę w tym pomóc.",
-    ],
-}
-
-def load_model() -> SentenceTransformer:
-    """Model embeddingów z tokenizerem wczytanym wprost z jego pliku tokenizer.json.
-
-    Automatyczny wybór tokenizera w zainstalowanej wersji transformers bierze dla tego modelu
-    klasę BertTokenizer, która większość słów zamienia na <unk> — embeddingi są wtedy bezużyteczne.
-    """
-    model = SentenceTransformer(MODEL)
-    tokenizer_file = Path(model[0].auto_model.config._name_or_path)
-    if not (tokenizer_file / "tokenizer.json").exists():
-        from huggingface_hub import snapshot_download
-        tokenizer_file = Path(snapshot_download(MODEL, allow_patterns=["tokenizer.json"]))
-    model.tokenizer = PreTrainedTokenizerFast(
-        tokenizer_file=str(tokenizer_file / "tokenizer.json"), bos_token="<s>", eos_token="</s>", unk_token="<unk>",
-        sep_token="</s>", pad_token="<pad>", cls_token="<s>", mask_token="<mask>")
-    return model
-
-
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
-
-
-def sentences(text: str) -> list[str]:
-    return [s.strip() for s in _SENTENCE.split(text) if len(s.strip()) > 3]
-
 
 def embed(model, texts: list[str]) -> np.ndarray:
     return model.encode(texts, normalize_embeddings=True, show_progress_bar=False)

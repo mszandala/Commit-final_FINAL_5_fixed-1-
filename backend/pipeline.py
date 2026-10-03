@@ -24,6 +24,7 @@ from config import (
     DEFAULT_TOOL_RESULT_SCAN,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
+    REFUSAL_DETECTION_ENABLED,
     ROLES,
     SETTINGS,
     TOOL_RESULT_SCAN,
@@ -41,7 +42,8 @@ from security.common.roles import normalize_role
 from security.common.verdicts import Verdict
 from security.masking import Vault, chatbot_action, label_for, role_policy
 from security.pii.pii_detector import detect_pii
-from security.pii.regex_detector import detect_regex_pii
+from security.pii.regex_detector import detect_regex_pii, is_date_like
+from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, detect_refusal
 from security.pii_judge import judge_entities
 from security.prompt_guard import check_prompt
 from security.tool_whitelist import ToolGate
@@ -190,7 +192,7 @@ def _well_formed(entity: dict) -> bool:
     return {
         # Próg celowo niski: detektor bywa myli typ liczby (np. SSN jako numer karty), a i tak warto ją ukryć.
         "CREDIT-CARD-NO": digits >= 4,
-        "PHONE-NO": digits >= 4,
+        "PHONE-NO": digits >= 4 and not is_date_like(text),      # model też bierze daty za telefony
         "EMAIL": "@" in text,
         "SALARY": digits >= 1,
     }.get(entity["type"], True)
@@ -431,6 +433,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     gate = SecureToolGate(conv, threshold, on_progress)
     output = {"entities": [], "restored": [], "redacted": [], "blocked": [], "exempt": [], "found": []}
     leaks = 0
+    refusal = None      # werdykt odmowy chatbota, jeśli ją wykryto
 
     def stage(name):
         if on_progress:
@@ -456,6 +459,8 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         verdicts = [verdict] if verdict else []
         if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
             verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)})
+        if refusal and refusal is not verdict:
+            verdicts.append(refusal)
         masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
         return TurnResult(reply, blocked, reason, guard, masked_prompt, list(entities), gate.calls,
                           output, leaks, events, verdict, tokens, latency, error, cost,
@@ -539,7 +544,16 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         if checked.decision in ("redact", "warn") and not (policy_note and policy_note["decision"] == "redact"):
             policy_note = {"decision": checked.decision, "stage": checked.stage, "reason": checked.reason}
 
-    # Jedna decyzja na turę, od najmocniejszej: ukrycie (PII, potem regulaminy), ostrzeżenie.
+    # Odmowa samego chatbota: warstwa niczego nie zablokowała, ale użytkownik nie dostał tego, o co prosił.
+    found = detect_refusal(raw_reply or "") if REFUSAL_DETECTION_ENABLED else None
+    if found:
+        denied = sorted({c["tool"] for c in gate.calls if not c["allowed"]})
+        audit.record("refusal", "security", method=found["method"], category=found["category"],
+                     score=found["score"], after_denied_tools=denied)
+        cause = f"po odrzuceniu narzędzia: {', '.join(denied)}" if denied else REFUSAL_CATEGORIES[found["category"]]
+        refusal = {"decision": "refuse", "stage": "chatbot_refusal", "reason": f"Chatbot odmówił ({cause})"}
+
+    # Jedna decyzja na turę, od najmocniejszej: ukrycie (PII, potem regulaminy), ostrzeżenie, odmowa chatbota.
     verdict = None
     if output["redacted"]:
         types = ", ".join(sorted(set(output["redacted"])))
@@ -550,4 +564,6 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         verdict = {"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)}
     elif policy_note:
         verdict = policy_note
+    elif refusal:
+        verdict = refusal
     return finish(reply, verdict, masked_prompt, entities, logged_reply)

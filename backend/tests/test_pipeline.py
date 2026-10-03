@@ -7,6 +7,7 @@ import pipeline
 from audit import logger as audit_logger
 from chatbot import llm_client
 from config import ROLES
+from security import refusal_detector
 from security.pii.regex_detector import detect_regex_pii
 from tools import domain_helpers
 
@@ -31,6 +32,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", True)
     monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
+    monkeypatch.setattr(refusal_detector, "REFUSAL_EMBEDDINGS_ENABLED", False)     # same słowa kluczowe, bez modelu
     pipeline._detect_cached.cache_clear()
     (tmp_path / "clients_data").mkdir()
     (tmp_path / "clients_data" / "Bank Customer Churn Prediction.csv").write_text(
@@ -351,3 +353,17 @@ def test_common_words_are_not_hidden_as_locations(monkeypatch):
     monkeypatch.setattr(pipeline, "_detect", lambda text, threshold=None: [dict(e) for e in entities])
     shown = pipeline.filter_output("podstawowy użytkownik", text)[0]
     assert shown == "city, demo environment, [LOCATION], [LOCATION]"
+
+
+def test_dates_are_not_masked_as_phone_numbers(llm, env):
+    llm.queue = [_reply("ok")]
+    prompt = "Podaj kurs AAPL z 2024-01-05, zakres 2018-2024, a zadzwoń na +48 600 700 800"
+    result = pipeline.run_turn(pipeline.Conversation("Portfolio Manager"), prompt)
+    assert result.masked_prompt == "Podaj kurs AAPL z 2024-01-05, zakres 2018-2024, a zadzwoń na <PHONE_NO_1>"
+
+
+def test_dates_reported_by_the_model_detector_are_ignored(llm, env, monkeypatch):
+    monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: [
+        {"type": "PHONE-NO", "text": "2024-01-05", "start": 3, "end": 13}])
+    llm.queue = [_reply("ok")]
+    assert pipeline.run_turn(pipeline.Conversation("prawnik"), "Od 2024-01-05").masked_prompt == "Od 2024-01-05"

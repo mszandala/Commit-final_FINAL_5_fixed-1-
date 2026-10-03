@@ -12,7 +12,7 @@ class ApiModel(BaseModel):
 
 # --- czat ------------------------------------------------------------------------------------
 
-Decision = Literal["pass", "warn", "redact", "block"]
+Decision = Literal["pass", "warn", "refuse", "redact", "block"]
 
 
 class Verdict(ApiModel):
@@ -132,7 +132,7 @@ class Meta(ApiModel):
 
 # --- log -------------------------------------------------------------------------------------
 
-EventDecision = Literal["Allowed", "Redacted", "Blocked", "Error"]
+EventDecision = Literal["Allowed", "Refused", "Redacted", "Blocked", "Error"]
 Level = Literal["info", "warn", "block"]
 
 

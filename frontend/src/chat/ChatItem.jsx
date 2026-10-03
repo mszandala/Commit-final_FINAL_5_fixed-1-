@@ -9,6 +9,7 @@ import ToolCall from './ToolCall'
 
 const VERDICTS = {
   warn: { icon: Flag, tone: 'amber', title: (control) => `Flagged by ${control}` },
+  refuse: { icon: Flag, tone: 'amber', title: () => 'Declined by the chatbot' },
   redact: { icon: EyeOff, tone: 'amber', title: (control) => `Redacted by ${control}` },
   block: { icon: Ban, tone: 'red', title: (control) => `Blocked by ${control}` },
 }

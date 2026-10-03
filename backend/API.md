@@ -69,7 +69,9 @@ Odpowiedź (`ChatResponse`):
 
 - `text` jest `null`, gdy tura została zablokowana; powód jest wtedy w `verdict`.
 - `verdict` to najważniejsza decyzja tury albo `null`:
-  `{ "decision": "warn" | "redact" | "block", "stage": "...", "reason": "..." }`.
+  `{ "decision": "warn" | "refuse" | "redact" | "block", "stage": "...", "reason": "..." }`.
+- `refuse` (etap `chatbot_refusal`) oznacza, że warstwa niczego nie zablokowała, ale sam chatbot odmówił:
+  `text` zawiera wtedy jego odpowiedź. Odmowę rozpoznają lokalnie słowa kluczowe i model embeddingów.
 - `stage` to klucz z `GET /meta → controls`: `prompt_guard`, `tool_whitelist`, `pii_policy`,
   `code_guard`, `company_policies`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
   warto brać z `/meta`, a nieznany klucz pokazywać wprost.
@@ -225,7 +227,7 @@ z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
 ```
 
 - `kind`: `prompt_guard`, `company_policy`, `prompt_masking`, `pii_judge`, `model_call`, `tool_call`,
-  `output_filter`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
+  `output_filter`, `refusal`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
 - `zone`: `security`, `chatbot`, `local`; nazwy w `GET /meta → zones`.
 - `level`: `info` — bez zastrzeżeń, `warn` — flaga, ostrzeżenie albo ukrycie danych, `block` — blokada,
   odrzucone narzędzie albo błąd.

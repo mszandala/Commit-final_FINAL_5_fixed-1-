@@ -11,6 +11,7 @@ from api.app import app
 from audit import logger as audit_logger
 from chatbot import llm_client
 from config import ROLES, SETTINGS
+from security import refusal_detector
 from security.pii.regex_detector import detect_regex_pii
 from tools import domain_helpers
 
@@ -35,6 +36,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", False)
     monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
+    monkeypatch.setattr(refusal_detector, "REFUSAL_EMBEDDINGS_ENABLED", False)     # same słowa kluczowe, bez modelu
     monkeypatch.setattr(config, "SPENDING_DB", tmp_path / "spending.db")
     pipeline._detect_cached.cache_clear()
     (tmp_path / "projects").mkdir()
@@ -75,7 +77,7 @@ def test_meta_and_roles():
     assert meta["piiTags"] == ["NAME", "SALARY", "ORGANIZATION", "LOCATION", "PROJECT"]
     assert meta["redactedPii"] == ["EMAIL", "PHONE-NO"] and meta["blockedPii"] == ["PASSWORD", "CREDIT-CARD-NO"]
     assert set(meta["controls"]) == {"prompt_guard", "tool_whitelist", "pii_policy", "code_guard",
-                                     "company_policies", "budget"}
+                                     "company_policies", "chatbot_refusal", "budget"}
 
     roles = {r["id"]: r for r in client.get(f"{API}/roles").json()}
     assert set(roles) == {"basic_user", "hr", "banker", "analyst", "lawyer", "portfolio_manager", "it", "admin"}
@@ -432,3 +434,30 @@ def test_budget_reset_for_one_role_and_for_all(llm):
     roles = {r["id"]: r["budget"] for r in client.post(f"{API}/budget/reset").json()}
     assert all(b["used"] == 0 and b["spent"] == 0.0 for b in roles.values())
     assert client.post(f"{API}/budget/reset?roleId=nobody").status_code == 404
+
+
+# --- odmowa chatbota -------------------------------------------------------------------------
+
+def test_chatbot_refusal_is_a_verdict_a_step_and_a_log_decision(llm):
+    llm += [_reply("I'm sorry, but I don't have the ability to send emails.")]
+    body = _chat("lawyer", "Wyślij maila do szefa").json()
+    assert body["text"].startswith("I'm sorry")                      # odpowiedź dociera do użytkownika
+    assert body["verdict"]["decision"] == "refuse" and body["verdict"]["stage"] == "chatbot_refusal"
+    row = client.get(f"{API}/events").json()[0]
+    assert (row["decision"], row["control"], row["level"]) == ("Refused", "Chatbot refusal", "warn")
+    step = _steps(body["eventId"])[-1]
+    assert (step["kind"], step["level"]) == ("refusal", "warn") and "detected by keywords" in step["summary"]
+
+
+def test_refusal_after_denied_tool_names_the_tool(llm):
+    llm += [_reply(tool_calls=[_tool_call("read_employee_records", limit=1)]), _reply("Przykro mi, nie mam uprawnień.")]
+    body = _chat("basic_user", "Pokaż pracowników").json()
+    refusal = next(v for v in body["verdicts"] if v["decision"] == "refuse")
+    assert "read_employee_records" in refusal["reason"]
+    assert client.get(f"{API}/events").json()[0]["decision"] == "Blocked"     # odrzucone narzędzie ma pierwszeństwo
+
+
+def test_ordinary_reply_is_not_a_refusal(llm):
+    llm += [_reply("W bazie nie znaleziono projektu o tej nazwie.")]
+    body = _chat("lawyer", "Czy mamy projekt X?").json()
+    assert body["verdict"] is None and client.get(f"{API}/events").json()[0]["decision"] == "Allowed"

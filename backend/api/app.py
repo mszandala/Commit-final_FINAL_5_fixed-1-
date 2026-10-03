@@ -316,6 +316,8 @@ def _warm_up() -> None:
         _load_model()
     except Exception as exc:
         logging.getLogger(__name__).warning("Nie udało się wczytać modelu PII: %s", exc)
+    from security import refusal_detector
+    refusal_detector.warm_up()      # sam loguje, gdy modelu nie da się wczytać
 
 
 @asynccontextmanager
