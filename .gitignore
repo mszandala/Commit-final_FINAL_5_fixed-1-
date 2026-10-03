@@ -1,1 +1,11 @@
+__pycache__/
+.pytest_cache/
+venv/
+.venv/
+__pychache__/
+*.pyc
 .env
+pyvenv.cfg
+backend/data/vector_db/
+
+backend/audit/events.jsonl

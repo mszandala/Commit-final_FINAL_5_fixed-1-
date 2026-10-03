@@ -1,0 +1,41 @@
+from typing import Optional
+
+from config import ROLES
+
+
+def is_allowed(role: str, tool: str) -> bool:
+    return tool in ROLES.get(role, {}).get("allowed_tools", [])
+
+
+class ToolGate:
+    """Bramka dla agenta: przepuszcza narzędzia z whitelisty roli, resztę odrzuca.
+
+    Każde wywołanie trafia do `calls` jako {"tool", "args", "allowed"}, a odrzucone dodatkowo
+    z {"stage", "reason"} — z tego czyta interfejs.
+    Na razie każde naruszenie traktujemy jak błąd modelu (pracuje dalej bez narzędzia);
+    ocena intencji użytkownika (tool_violation_judge) dojdzie później.
+    """
+
+    def __init__(self, role: str):
+        self.role = role
+        self.calls: list[dict] = []
+
+    @property
+    def violations(self) -> list[dict]:
+        return [c for c in self.calls if not c["allowed"]]
+
+    def __call__(self, name: str, args: dict) -> Optional[str]:
+        allowed = is_allowed(self.role, name)
+        call = {"tool": name, "args": args, "allowed": allowed}
+        if not allowed:
+            call.update(stage="tool_whitelist", reason=f"Narzędzie niedostępne dla roli „{self.role}”")
+        self.calls.append(call)
+        if allowed:
+            return None
+        allowed_tools = ROLES.get(self.role, {}).get("allowed_tools", [])
+        tools_str = ", ".join(allowed_tools) if allowed_tools else "none"
+        return (
+            f"Access denied: tool '{name}' is not authorized for the user's role ('{self.role}'). "
+            f"Authorized tools for this role are: [{tools_str}]. "
+            f"Do not call '{name}' again. If an authorized tool can answer the user's query, call that tool instead."
+        )
