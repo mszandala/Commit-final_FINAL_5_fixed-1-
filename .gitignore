@@ -1,6 +1,5 @@
 __pycache__/
 .pytest_cache/
-<<<<<<< HEAD
 venv/
 .venv/
 __pychache__/
@@ -8,3 +7,4 @@ __pychache__/
 .env
 pyvenv.cfg
 
+backend/audit/events.jsonl

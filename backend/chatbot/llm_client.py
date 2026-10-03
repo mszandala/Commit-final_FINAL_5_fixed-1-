@@ -6,6 +6,7 @@ from typing import Optional
 import ollama
 from openai import OpenAI
 
+from audit import logger as audit
 from config import (
     LLM_PROVIDER,
     MODEL,
@@ -13,6 +14,8 @@ from config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
+    SECURITY_MODEL,
+    SECURITY_PROVIDER,
 )
 
 
@@ -168,20 +171,33 @@ def chat(
     tools: Optional[list] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    zone: str = "chatbot",
+    purpose: str = "chat",
 ):
     """Jedno wywołanie modelu. Zwraca wiadomość asystenta (content + tool_calls).
 
     Dostępne providery:
       - 'openrouter' (domyślny)
       - 'ollama'
+
+    Strefy:
+      - 'chatbot'  (domyślna): model odpowiadający użytkownikowi; dostaje dane zamaskowane
+      - 'security': strażnicy i sędziowie; własny provider i model (SECURITY_*), dane surowe
     """
+    if zone == "security":
+        provider = provider or SECURITY_PROVIDER
+        model = model or SECURITY_MODEL
     chosen_provider = (provider or LLM_PROVIDER).lower()
 
     if chosen_provider == "openrouter":
-        return _chat_openrouter(messages, tools=tools, model=model)
+        call, used_model = _chat_openrouter, model or OPENROUTER_MODEL
     elif chosen_provider == "ollama":
-        return _chat_ollama(messages, tools=tools, model=model)
+        call, used_model = _chat_ollama, model or OLLAMA_MODEL
     else:
         raise ValueError(
             f"Nieznany provider: {chosen_provider}. Dostępne opcje to 'openrouter' i 'ollama'."
         )
+
+    audit.record("llm_call", zone, purpose=purpose, provider=chosen_provider, model=used_model,
+                 messages=len(messages))
+    return call(messages, tools=tools, model=model)
