@@ -235,3 +235,12 @@ def test_account_number_is_pseudonymized(llm, env):
     result = pipeline.run_turn(pipeline.Conversation("bankier"), "Pokaż klienta")
     assert result.reply.split("\n")[1] == f"{CLIENT},9999{CLIENT},Spain"
     assert CLIENT not in _sent_to_chatbot(llm)
+
+
+def test_common_words_are_not_hidden_as_locations(monkeypatch):
+    text = "city, demo environment, Isle of Man, Kraków"
+    entities = [{"type": "LOCATION", "text": t, "start": text.index(t), "end": text.index(t) + len(t)}
+                for t in text.split(", ")]
+    monkeypatch.setattr(pipeline, "_detect", lambda text, threshold=None: [dict(e) for e in entities])
+    shown = pipeline.filter_output("podstawowy użytkownik", text)[0]
+    assert shown == "city, demo environment, [LOCATION], [LOCATION]"

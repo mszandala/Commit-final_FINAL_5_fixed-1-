@@ -233,9 +233,12 @@ def _plausible(entity: dict) -> bool:
 
     GLiNER na polskim tekście oznacza zwykłe słowa ("Kobieta", "Wiek") jako osoby.
     """
+    words = entity["text"].split()
     if entity["type"] == "NAME":
-        words = entity["text"].split()
         return len(words) >= 2 and all(w[0].isupper() for w in words)
+    # Także zwykłe słowa ("city", "demo environment") jako miejsca; krótkie łączniki ("Isle of Man") zostają.
+    if entity["type"] == "LOCATION":
+        return bool(words) and words[0][0].isupper() and all(w[0].isupper() or len(w) <= 3 for w in words)
     return True
 
 
