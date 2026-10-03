@@ -8,4 +8,5 @@ __pychache__/
 pyvenv.cfg
 backend/data/vector_db/
 
-backend/audit/events.jsonl
+backend/audit/*.jsonl
+backend/audit/*.db

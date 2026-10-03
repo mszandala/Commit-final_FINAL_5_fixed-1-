@@ -69,7 +69,9 @@ Odpowiedź (`ChatResponse`):
 
 - `text` jest `null`, gdy tura została zablokowana; powód jest wtedy w `verdict`.
 - `verdict` to najważniejsza decyzja tury albo `null`:
-  `{ "decision": "warn" | "redact" | "block", "stage": "...", "reason": "..." }`.
+  `{ "decision": "warn" | "refuse" | "redact" | "block", "stage": "...", "reason": "..." }`.
+- `refuse` (etap `chatbot_refusal`) oznacza, że warstwa niczego nie zablokowała, ale sam chatbot odmówił:
+  `text` zawiera wtedy jego odpowiedź. Odmowę rozpoznają lokalnie słowa kluczowe i model embeddingów.
 - `stage` to klucz z `GET /meta → controls`: `prompt_guard`, `tool_whitelist`, `pii_policy`,
   `code_guard`, `company_policies`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
   warto brać z `/meta`, a nieznany klucz pokazywać wprost.
@@ -204,6 +206,54 @@ z `afterId` — kolejne wiersze po nim:
 `leaksToChatbot` (ile zamaskowanych wartości trafiło do chatbota; oczekiwane 0) oraz `trail` —
 zdarzenia audytu tury z polem `zone` (`security`, `chatbot`, `local`), bez surowych wartości.
 
+### Kroki tury
+
+Każda tura ma `level` (`info`, `warn`, `block` — najwyższy poziom spośród jej kroków) i `stepCount`.
+Kroki zwraca `GET /events/{id}` oraz `GET /events?steps=true`; `minLevel=warn` zostawia tury
+z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
+
+```json
+{
+  "index": 4,
+  "kind": "tool_call",
+  "label": "Tool call",
+  "zone": "security",
+  "level": "block",
+  "summary": "read_employee_records(limit=1) rejected by Tool permissions: ...",
+  "atMs": 1840,
+  "durationMs": 2,
+  "details": { "tool": "read_employee_records", "allowed": false, "stage": "tool_whitelist" }
+}
+```
+
+- `kind`: `prompt_guard`, `company_policy`, `prompt_masking`, `pii_judge`, `model_call`, `tool_call`,
+  `output_filter`, `refusal`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
+- `zone`: `security`, `chatbot`, `local`; nazwy w `GET /meta → zones`.
+- `level`: `info` — bez zastrzeżeń, `warn` — flaga, ostrzeżenie albo ukrycie danych, `block` — blokada,
+  odrzucone narzędzie albo błąd.
+- `summary` jest po angielsku; powody decyzji strażników zostają w oryginale.
+- `atMs` to czas od początku tury, `durationMs` — czas od poprzedniego kroku.
+- `details` to pełne zdarzenie audytu, bez surowych wartości wrażliwych.
+
+Log jest zapisywany w bazie rozmów (niżej) i wczytywany przy starcie serwera.
+
+### Zapisane rozmowy i komentarze
+
+Tury są zapisywane w bazie `backend/audit/conversations.db` (SQLite) i pogrupowane w rozmowy po
+`conversationId`. Treści mają tę samą, zamaskowaną postać co w logu.
+
+| Metoda | Ścieżka | Do czego |
+|---|---|---|
+| GET | `/conversations` | lista rozmów: rola, użytkownik, czas, liczba tur, poziom, liczba komentarzy |
+| GET | `/conversations/{id}` | jedna rozmowa: tury z krokami i komentarze |
+| GET | `/conversations/export` | wszystkie rozmowy z turami, krokami i komentarzami jako plik JSON |
+| GET | `/conversations/{id}/comments` | komentarze rozmowy |
+| POST | `/conversations/{id}/comments` | nowy komentarz: `{ "text": "...", "author": "QA", "eventId": 12 }` |
+| DELETE | `/comments/{id}` | usunięcie komentarza |
+
+`author` (domyślnie „QA") i `eventId` (tura, której dotyczy uwaga) są opcjonalne. Wiersze
+`GET /events` mają `commentCount` — liczbę komentarzy do rozmowy, do której należy tura.
+
 `GET /stats`:
 
 ```json
@@ -214,6 +264,7 @@ zdarzenia audytu tury z polem `zone` (`security`, `chatbot`, `local`), bez surow
 ## Czego w v1 nie ma
 
 - **Załączniki.** Composer pozwala dodać pliki, ale backend nie ma jeszcze ich obsługi.
-- **Trwałość.** Log i konfiguracja znikają po restarcie serwera; zostają budżety (`spending.db`)
-  i szczegółowy log audytu (`audit/events.jsonl`).
+- **Trwałość konfiguracji i kontekstu rozmowy.** Zmiany konfiguracji i historia, którą widzi model,
+  znikają po restarcie serwera; zostają zapisane rozmowy (`audit/conversations.db`), log zdarzeń
+  (`audit/events.jsonl`) i budżety (`spending.db`).
 - **Uwierzytelnianie.** Każdy klient może wybrać dowolną rolę i zmienić konfigurację.

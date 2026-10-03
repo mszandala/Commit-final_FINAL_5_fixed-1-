@@ -24,6 +24,7 @@ from config import (
     DEFAULT_TOOL_RESULT_SCAN,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
+    REFUSAL_DETECTION_ENABLED,
     ROLES,
     SETTINGS,
     TOOL_RESULT_SCAN,
@@ -41,7 +42,8 @@ from security.common.roles import normalize_role
 from security.common.verdicts import Verdict
 from security.masking import Vault, chatbot_action, label_for, role_policy
 from security.pii.pii_detector import detect_pii
-from security.pii.regex_detector import detect_regex_pii
+from security.pii.regex_detector import detect_regex_pii, is_date_like
+from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, detect_refusal
 from security.pii_judge import judge_entities
 from security.prompt_guard import check_prompt
 from security.tool_whitelist import ToolGate
@@ -124,9 +126,13 @@ def _soften(engine: CompanyPolicyEngine, role: str, text: str, verdict, public_o
 def _policy_check(point: str, verdict, softened: bool = False) -> None:
     """Zapisuje decyzję regulaminów w śladzie tury (bez treści — moduł ma też własny log z hashami)."""
     d = verdict.details
+    semantic = d.get("semantic") or {}
     audit.record("company_policy", "security", point=point, decision=verdict.decision,
                  rule_id=d.get("rule_id"), section=d.get("section"), violation=d.get("violation_type"),
-                 layer=d.get("layer"), detector_error=bool(d.get("detector_error")), softened=softened)
+                 layer=d.get("layer"), methods=d.get("methods"), detector_error=bool(d.get("detector_error")),
+                 softened=softened, reason=verdict.reason if verdict.decision != "pass" else None,
+                 classifier=({"category": semantic.get("category"), "confidence": semantic.get("confidence")}
+                             if semantic else None))
 
 
 @dataclass
@@ -186,7 +192,7 @@ def _well_formed(entity: dict) -> bool:
     return {
         # Próg celowo niski: detektor bywa myli typ liczby (np. SSN jako numer karty), a i tak warto ją ukryć.
         "CREDIT-CARD-NO": digits >= 4,
-        "PHONE-NO": digits >= 4,
+        "PHONE-NO": digits >= 4 and not is_date_like(text),      # model też bierze daty za telefony
         "EMAIL": "@" in text,
         "SALARY": digits >= 1,
     }.get(entity["type"], True)
@@ -206,6 +212,15 @@ def _label_sensitive(text: str, entities: list[dict]) -> str:
     """Wersja do logu: każda encja wrażliwa w kanale chatbota zamieniona na etykietę typu."""
     return _replace_spans(text, [e for e in entities if chatbot_action(e["type"]) != "allow"],
                           lambda e: label_for(e["type"]))
+
+
+def _logged_prompt(prompt: str, threshold: Optional[float]) -> str:
+    """Prompt tury zatrzymanej przed modelem, w postaci nadającej się do logu.
+
+    Taka tura nie dochodzi do maskowania, a bez treści promptu nie da się potem ustalić, co zostało
+    zablokowane. Wartości wrażliwe są zamieniane na etykiety typu, jak w reszcie logu.
+    """
+    return _label_sensitive(prompt, _detect(prompt, threshold))
 
 
 def mask_prompt(conv: Conversation, prompt: str, threshold: Optional[float] = None) -> tuple[str, list, bool]:
@@ -261,7 +276,8 @@ class SecureToolGate:
         # Subagent dopisuje własne wywołania do `calls`, zanim to się skończy — trzymamy własny wpis.
         call = self.calls[-1]
         if refusal is not None:
-            audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist")
+            audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist",
+                         reason=call.get("reason"))
             self._report(call)
             return refusal
 
@@ -287,7 +303,7 @@ class SecureToolGate:
             verdict = engine.check_tool_call(self.conv.role, name, real_args)
             _policy_check("tool", verdict)
             if verdict.decision in ("block", "redact"):
-                return self._deny_by_policy(name, args, verdict,
+                return self._deny_by_policy(call, verdict,
                                             f"Access denied by company policy: {verdict.reason} Do not call this "
                                             "tool again with this data. Tell the user the request is not allowed.")
 
@@ -298,7 +314,7 @@ class SecureToolGate:
                                         public_only=name in PUBLIC_SOURCE_TOOLS)
             _policy_check("retrieval", verdict, softened)
             if verdict.decision == "block":
-                return self._deny_by_policy(name, args, verdict,
+                return self._deny_by_policy(call, verdict,
                                             f"Tool result withheld by company policy: {verdict.reason}")
             result = verdict.details.get("redacted_text") or result
         masked, scan, stats = self._mask_result(name, result)
@@ -311,11 +327,11 @@ class SecureToolGate:
         self._report(call)
         return masked
 
-    def _deny_by_policy(self, name: str, args: dict, verdict, message: str) -> str:
-        self.calls[-1].update(allowed=False, stage=verdict.stage, reason=verdict.reason)
-        audit.record("tool_call", "security", tool=name, allowed=False, args=args,
+    def _deny_by_policy(self, call: dict, verdict, message: str) -> str:
+        call.update(allowed=False, stage=verdict.stage, reason=verdict.reason)
+        audit.record("tool_call", "security", tool=call["tool"], allowed=False, args=call["args"],
                      stage=verdict.stage, reason=verdict.reason)
-        self._report(name)
+        self._report(call)
         return message
 
     def _mask_result(self, name: str, result: str) -> tuple[str, str, dict]:
@@ -426,6 +442,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     gate = SecureToolGate(conv, threshold, on_progress)
     output = {"entities": [], "restored": [], "redacted": [], "blocked": [], "exempt": [], "found": []}
     leaks = 0
+    refusal = None      # werdykt odmowy chatbota, jeśli ją wykryto
 
     def stage(name):
         if on_progress:
@@ -451,6 +468,8 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         verdicts = [verdict] if verdict else []
         if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
             verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)})
+        if refusal and refusal is not verdict:
+            verdicts.append(refusal)
         masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
         return TurnResult(reply, blocked, reason, guard, masked_prompt, list(entities), gate.calls,
                           output, leaks, events, verdict, tokens, latency, error, cost,
@@ -465,10 +484,12 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     flagged = guard.decision == "warn"
     guard_blocks = guard.is_blocked or (flagged and SETTINGS.guard_mode == "block")
     audit.record("prompt_guard", "security", decision=guard.decision, blocked=guard_blocks,
+                 reason=_clean(guard.reason) if flagged or guard_blocks else None,
                  details={k: v for k, v in guard.details.items() if k != "warning"})
     if guard_blocks:
         reason = _clean(guard.reason)
-        return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason))
+        return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason),
+                      _logged_prompt(user_message, threshold))
 
     # 2. Regulaminy firmowe na surowym prompcie: blokada, ukrycie fragmentu albo ostrzeżenie
     engine = policy_engine()
@@ -478,7 +499,8 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         checked = engine.check_input(conv.role, user_message)
         _policy_check("input", checked)
         if checked.decision == "block":
-            return finish(f"Zapytanie zostało zablokowane: {checked.reason}", block(checked.stage, checked.reason))
+            return finish(f"Zapytanie zostało zablokowane: {checked.reason}", block(checked.stage, checked.reason),
+                          _logged_prompt(user_message, threshold))
         if checked.decision == "redact":
             prompt = checked.details.get("redacted_text") or user_message
         if checked.decision in ("redact", "warn"):
@@ -533,7 +555,16 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         if checked.decision in ("redact", "warn") and not (policy_note and policy_note["decision"] == "redact"):
             policy_note = {"decision": checked.decision, "stage": checked.stage, "reason": checked.reason}
 
-    # Jedna decyzja na turę, od najmocniejszej: ukrycie (PII, potem regulaminy), ostrzeżenie.
+    # Odmowa samego chatbota: warstwa niczego nie zablokowała, ale użytkownik nie dostał tego, o co prosił.
+    found = detect_refusal(raw_reply or "") if REFUSAL_DETECTION_ENABLED else None
+    if found:
+        denied = sorted({c["tool"] for c in gate.calls if not c["allowed"]})
+        audit.record("refusal", "security", method=found["method"], category=found["category"],
+                     score=found["score"], after_denied_tools=denied)
+        cause = f"po odrzuceniu narzędzia: {', '.join(denied)}" if denied else REFUSAL_CATEGORIES[found["category"]]
+        refusal = {"decision": "refuse", "stage": "chatbot_refusal", "reason": f"Chatbot odmówił ({cause})"}
+
+    # Jedna decyzja na turę, od najmocniejszej: ukrycie (PII, potem regulaminy), ostrzeżenie, odmowa chatbota.
     verdict = None
     if output["redacted"]:
         types = ", ".join(sorted(set(output["redacted"])))
@@ -544,4 +575,6 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         verdict = {"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)}
     elif policy_note:
         verdict = policy_note
+    elif refusal:
+        verdict = refusal
     return finish(reply, verdict, masked_prompt, entities, logged_reply)

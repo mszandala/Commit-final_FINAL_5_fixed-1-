@@ -23,10 +23,18 @@ async function request(path, { method = 'GET', body } = {}) {
 
 export const getMeta = () => request('/meta')
 export const getRoles = () => request('/roles')
+export const resetBudget = (roleId) =>
+  request(`/budget/reset${roleId ? `?roleId=${encodeURIComponent(roleId)}` : ''}`, { method: 'POST' })
 export const getConfig = () => request('/config')
 export const getConfigDefaults = () => request('/config/defaults')
 export const updateConfig = (update) => request('/config', { method: 'PUT', body: update })
-export const getEvents = () => request('/events')
+export const getEvents = () => request('/events?steps=true')
+export const getComments = (conversationId) => request(`/conversations/${conversationId}/comments`)
+export const addComment = (conversationId, comment) =>
+  request(`/conversations/${conversationId}/comments`, { method: 'POST', body: comment })
+export const deleteComment = (id) => request(`/comments/${id}`, { method: 'DELETE' })
+// All saved conversations with their turns, steps and comments, as a JSON download.
+export const EXPORT_URL = `${BASE}/conversations/export`
 export const endConversation = (id) => request(`/conversations/${id}`, { method: 'DELETE' })
 
 // One chat turn over SSE. `onEvent(kind, data)` gets each stage and tool event;

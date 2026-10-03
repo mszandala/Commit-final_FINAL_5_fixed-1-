@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import pipeline
+from api.steps import build_steps, turn_level
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -103,6 +105,15 @@ _events: list[dict] = []
 _events_lock = threading.Lock()
 
 
+def load_events() -> None:
+    """Wczytuje log z bazy rozmów (start serwera), żeby przetrwał restart."""
+    rows = store.load_turns()
+    for row in rows:
+        row["time"] = datetime.fromisoformat(row["time"])
+    with _events_lock:
+        _events[:] = rows
+
+
 def _summarize(result: Optional[pipeline.TurnResult], verdict: Optional[dict], tools: list) -> tuple[str, Optional[str], str]:
     """Jeden wiersz logu na turę: (decyzja, etap, powód).
 
@@ -125,6 +136,8 @@ def _decide(result: Optional[pipeline.TurnResult], verdict: Optional[dict], tool
         return "Blocked", denied["stage"], f'{denied["tool"]}: {denied["reason"]}'
     if verdict and verdict["decision"] == "redact":
         return "Redacted", verdict["stage"], verdict["reason"]
+    if verdict and verdict["decision"] == "refuse":
+        return "Refused", verdict["stage"], verdict["reason"]
     if verdict and verdict["decision"] == "warn":
         return "Allowed", verdict["stage"], f'Oflagowano: {verdict["reason"]}'
     if result and result.output.get("found"):
@@ -138,9 +151,13 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
     tools = result.tool_calls if result else []
     decision, stage, reason = _summarize(result, verdict, tools)
     cfg = ROLES[role]
+    # Tura zatrzymana przez budżet nie wchodzi do pipeline'u, więc jej jedyny krok powstaje tutaj.
+    trail = result.events if result else (
+        [{"type": "budget", "zone": "security", "reason": verdict["reason"]}] if verdict else [])
+    steps = build_steps(trail)
     with _events_lock:
         event = {
-            "id": len(_events) + 1,
+            "id": (_events[-1]["id"] + 1) if _events else 1,
             "time": datetime.now(timezone.utc),
             "user": cfg["user"],
             "role": cfg["label"],
@@ -150,17 +167,22 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "stage": stage,
             "control": CONTROLS.get(stage, stage or ""),
             "reason": reason,
+            "level": turn_level(steps, decision),
+            "step_count": len(steps),
             "masked_for_model": result.masked_for_model if result else [],
             "model": next((e.get("model") for e in result.events
                            if e["type"] == "llm_call" and e["zone"] == "chatbot"), None) if result else None,
             "tokens": result.tokens if result else 0,
             "latency_ms": result.latency_ms if result else 0,
             "masked_prompt": result.masked_prompt if result else "",
+            "reply": next((e.get("reply") or "" for e in trail if e["type"] == "turn"), ""),
             "tools": tools,
             "leaks_to_chatbot": result.leaks_to_chatbot if result else 0,
-            "trail": result.events if result else [],
+            "trail": trail,
+            "steps": steps,
         }
         _events.append(event)
+        store.add_turn({**event, "time": event["time"].isoformat()})
         return event
 
 
@@ -173,7 +195,40 @@ def list_events(after_id: Optional[int] = None, limit: int = 200, decision: Opti
 
 def get_event(event_id: int) -> Optional[dict]:
     with _events_lock:
-        return _events[event_id - 1] if 0 < event_id <= len(_events) else None
+        return next((e for e in _events if e["id"] == event_id), None)
+
+
+def list_conversations() -> list[dict]:
+    """Rozmowy z logu, od najstarszej: podsumowanie tur i liczba komentarzy."""
+    counts = store.comment_counts()
+    with _events_lock:
+        rows = list(_events)
+    grouped: dict[str, list[dict]] = {}
+    for event in rows:
+        grouped.setdefault(event["conversation_id"], []).append(event)
+    levels = ["info", "warn", "block"]
+    return [{
+        "id": conversation_id,
+        "role": turns[0]["role"],
+        "role_id": turns[0]["role_id"],
+        "user": turns[0]["user"],
+        "started_at": turns[0]["time"],
+        "last_at": turns[-1]["time"],
+        "turn_count": len(turns),
+        "level": max((t["level"] for t in turns), key=levels.index),
+        "comment_count": counts.get(conversation_id, 0),
+    } for conversation_id, turns in grouped.items()]
+
+
+def get_conversation(conversation_id: str) -> Optional[dict]:
+    summary = next((c for c in list_conversations() if c["id"] == conversation_id), None)
+    if summary is None:
+        return None
+    comments = store.list_comments(conversation_id)
+    with _events_lock:
+        turns = [{**e, "comments": [c for c in comments if c["event_id"] == e["id"]]}
+                 for e in _events if e["conversation_id"] == conversation_id]
+    return {**summary, "comments": comments, "turns": turns}
 
 
 def reset_state() -> None:

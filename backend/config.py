@@ -89,6 +89,7 @@ CONTROLS = {
     "pii_policy":     "PII policy",
     "code_guard":     "Code guard",
     "company_policies": "Company policy",
+    "chatbot_refusal": "Chatbot refusal",
     "budget":         "Token budget",
 }
 
@@ -113,6 +114,13 @@ COMPANY_POLICIES_CLASSIFIER = os.getenv("COMPANY_POLICIES_CLASSIFIER", "security
 # wyników spółki), więc domyślnie daje ostrzeżenie zamiast blokady. W prompcie blokuje jak dotąd;
 # znaczniki, wzorce, odciski plików i klasyfikator blokują wszędzie. true = blokuj także tutaj.
 COMPANY_POLICIES_STRICT_KEYWORDS = os.getenv("COMPANY_POLICIES_STRICT_KEYWORDS", "false").lower() == "true"
+
+# Wykrywanie odmowy w odpowiedzi chatbota (security/refusal_detector.py): słowa kluczowe, a gdy nic
+# nie znajdą — podobieństwo zdań do wzorcowych odmów liczone lokalnym modelem embeddingów.
+REFUSAL_DETECTION_ENABLED = os.getenv("REFUSAL_DETECTION_ENABLED", "true").lower() == "true"
+REFUSAL_EMBEDDINGS_ENABLED = os.getenv("REFUSAL_EMBEDDINGS_ENABLED", "true").lower() == "true"
+REFUSAL_MODEL = os.getenv("REFUSAL_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+REFUSAL_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.5"))
 
 # Ogólne reguły postępowania dla chatbota (decyzje kadrowe, dyskryminacja itp.). Warstwa nie zmienia
 # promptu systemowego chronionego chatbota — reguły dołącza do pierwszej wiadomości rozmowy.

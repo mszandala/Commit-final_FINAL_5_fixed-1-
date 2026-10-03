@@ -13,10 +13,12 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import pipeline
 from api import schemas, state
+from api.steps import LEVELS, STEP_KINDS, ZONES
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -145,6 +147,8 @@ def meta():
         blocked_pii=GLOBAL_BLOCKED_PII,
         pii_labels=PII_LABELS,
         controls=CONTROLS,
+        step_kinds=STEP_KINDS,
+        zones=ZONES,
         stages=STAGES,
         examples=EXAMPLES,
     )
@@ -159,6 +163,13 @@ def roles():
     ]
 
 
+@router.post("/budget/reset", response_model=list[schemas.Role], tags=["roles"],
+             summary="Zeruje zużycie tokenów i wydatki roli (roleId) albo wszystkich ról; zwraca role jak GET /roles")
+def reset_budget(role_id: Optional[str] = Query(None, alias="roleId")):
+    state.budget.reset(_role_name(role_id) if role_id else None)
+    return roles()
+
+
 @router.get("/config", response_model=schemas.Config, tags=["config"])
 def get_config():
     return _config()
@@ -170,6 +181,9 @@ def update_config(update: schemas.ConfigUpdate):
     provider = update.provider or SETTINGS.provider
     model = update.model or SETTINGS.model
     presets = {m["id"]: m["provider"] for m in MODEL_PRESETS}
+    # Model z .env może spoza listy, więc odrzucamy tylko nowy, nieznany wybór.
+    if model != SETTINGS.model and model not in presets:
+        raise HTTPException(422, f"Nieznany model: {model}")
     if presets.get(model, provider) != provider:
         raise HTTPException(422, f"Model {model} nie należy do providera {provider}")
 
@@ -268,8 +282,16 @@ def end_conversation(conversation_id: str):
             summary="Wiersze logu, najstarsze pierwsze. Bez afterId: ostatnie `limit` wierszy; z afterId: kolejne po nim")
 def events(after_id: Optional[int] = Query(None, alias="afterId", ge=0),
            limit: int = Query(200, ge=1, le=1000),
-           decision: Optional[schemas.EventDecision] = None):
-    return state.list_events(after_id, limit, decision)
+           decision: Optional[schemas.EventDecision] = None,
+           min_level: Optional[schemas.Level] = Query(None, alias="minLevel",
+                                                      description="warn = ostrzeżenia i blokady, block = tylko blokady"),
+           steps: bool = Query(False, description="Dołącz kroki każdej tury")):
+    rows = state.list_events(after_id, limit, decision)
+    if min_level:
+        rows = [e for e in rows if LEVELS.index(e["level"]) >= LEVELS.index(min_level)]
+    counts = store.comment_counts()
+    rows = [{**e, "comment_count": counts.get(e["conversation_id"], 0)} for e in rows]
+    return rows if steps else [{**e, "steps": None} for e in rows]
 
 
 @router.get("/events/{event_id}", response_model=schemas.EventDetail, tags=["logs"],
@@ -300,12 +322,67 @@ def _warm_up() -> None:
         _load_model()
     except Exception as exc:
         logging.getLogger(__name__).warning("Nie udało się wczytać modelu PII: %s", exc)
+    from security import refusal_detector
+    refusal_detector.warm_up()      # sam loguje, gdy modelu nie da się wczytać
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    state.load_events()
     threading.Thread(target=_warm_up, daemon=True).start()
     yield
+
+
+# --- zapisane rozmowy i komentarze -----------------------------------------------------------
+
+def _known_conversation(conversation_id: str) -> None:
+    if state.get_conversation(conversation_id) is None:
+        raise HTTPException(404, f"Nieznana rozmowa: {conversation_id}")
+
+
+@router.get("/conversations", response_model=list[schemas.Conversation], tags=["conversations"],
+            summary="Zapisane rozmowy, od najstarszej, z liczbą tur i komentarzy")
+def conversations():
+    return state.list_conversations()
+
+
+@router.get("/conversations/export", tags=["conversations"],
+            summary="Wszystkie zapisane rozmowy z turami, krokami i komentarzami jako plik JSON")
+def export_conversations():
+    data = [schemas.ConversationDetail(**state.get_conversation(c["id"])).model_dump(by_alias=True, mode="json")
+            for c in state.list_conversations()]
+    return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="conversations.json"'})
+
+
+@router.get("/conversations/{conversation_id}", response_model=schemas.ConversationDetail, tags=["conversations"],
+            summary="Jedna rozmowa: wszystkie tury z krokami oraz komentarze")
+def conversation(conversation_id: str):
+    _known_conversation(conversation_id)
+    return state.get_conversation(conversation_id)
+
+
+@router.get("/conversations/{conversation_id}/comments", response_model=list[schemas.Comment],
+            tags=["conversations"])
+def comments(conversation_id: str):
+    _known_conversation(conversation_id)
+    return store.list_comments(conversation_id)
+
+
+@router.post("/conversations/{conversation_id}/comments", response_model=schemas.Comment, status_code=201,
+             tags=["conversations"], summary="Dodaje komentarz do rozmowy (opcjonalnie do konkretnej tury)")
+def add_comment(conversation_id: str, comment: schemas.CommentCreate):
+    _known_conversation(conversation_id)
+    if comment.event_id is not None:
+        event = state.get_event(comment.event_id)
+        if event is None or event["conversation_id"] != conversation_id:
+            raise HTTPException(422, f"Tura {comment.event_id} nie należy do tej rozmowy")
+    return store.add_comment(conversation_id, comment.text.strip(), comment.author.strip(), comment.event_id)
+
+
+@router.delete("/comments/{comment_id}", status_code=204, tags=["conversations"])
+def delete_comment(comment_id: int):
+    if not store.delete_comment(comment_id):
+        raise HTTPException(404, f"Nieznany komentarz: {comment_id}")
 
 
 def create_app() -> FastAPI:

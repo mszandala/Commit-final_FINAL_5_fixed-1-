@@ -12,7 +12,7 @@ class ApiModel(BaseModel):
 
 # --- czat ------------------------------------------------------------------------------------
 
-Decision = Literal["pass", "warn", "redact", "block"]
+Decision = Literal["pass", "warn", "refuse", "redact", "block"]
 
 
 class Verdict(ApiModel):
@@ -124,13 +124,29 @@ class Meta(ApiModel):
     blocked_pii: list[str] = Field(description="Typy zawsze blokujące odpowiedź")
     pii_labels: dict[str, str] = Field(description="Typ ze znacznika [TYP] w tekście -> nazwa dla ludzi")
     controls: dict[str, str] = Field(description="Etap kontroli -> nazwa dla ludzi")
+    step_kinds: dict[str, str] = Field(description="Rodzaj kroku w logu -> nazwa dla ludzi")
+    zones: dict[str, str] = Field(description="Strefa kroku -> nazwa dla ludzi")
     stages: dict[str, str] = Field(description="Etap tury (zdarzenie stage w strumieniu) -> nazwa dla ludzi")
     examples: list[str]
 
 
 # --- log -------------------------------------------------------------------------------------
 
-EventDecision = Literal["Allowed", "Redacted", "Blocked", "Error"]
+EventDecision = Literal["Allowed", "Refused", "Redacted", "Blocked", "Error"]
+Level = Literal["info", "warn", "block"]
+
+
+class Step(ApiModel):
+    """Jeden krok tury: decyzja strażnika, wywołanie modelu albo narzędzia."""
+    index: int
+    kind: str = Field(description="Rodzaj kroku; klucze i nazwy w GET /meta -> stepKinds")
+    label: str
+    zone: str = Field(description="Gdzie krok się wykonał; klucze i nazwy w GET /meta -> zones")
+    level: Level = Field(description="info = bez zastrzeżeń, warn = ostrzeżenie lub ukrycie danych, block = blokada")
+    summary: str
+    at_ms: int = Field(description="Czas od początku tury do końca kroku")
+    duration_ms: int
+    details: dict[str, Any] = Field(description="Pełne zdarzenie audytu; bez surowych wartości wrażliwych")
 
 
 class Event(ApiModel):
@@ -144,6 +160,14 @@ class Event(ApiModel):
     stage: Optional[str] = Field(description="Etap, który zdecydował; null dla zwykłej tury")
     control: str = Field(description="Nazwa etapu dla ludzi; pusta dla zwykłej tury")
     reason: str
+    level: Level = Field(description="Najwyższy poziom spośród kroków tury")
+    step_count: int
+    comment_count: int = Field(0, description="Liczba komentarzy do rozmowy, do której należy tura")
+    steps: Optional[list[Step]] = Field(None, description="Kroki tury; w liście tylko przy ?steps=true")
+    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota; dla tury zablokowanej przed "
+                                           "modelem — prompt z wartościami wrażliwymi zamienionymi na etykiety")
+    reply: str = Field("", description="Odpowiedź chatbota z wartościami wrażliwymi zamienionymi na etykiety; "
+                                       "pusta, gdy model nie odpowiedział")
     masked_for_model: list[str] = Field(description="Typy danych z promptu ukryte przed chatbotem")
     model: Optional[str] = Field(description="Model chatbota w tej turze; null, gdy nie był wołany")
     tokens: int
@@ -151,10 +175,48 @@ class Event(ApiModel):
 
 
 class EventDetail(Event):
-    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota")
+    steps: list[Step]
     tools: list[ToolCall]
     leaks_to_chatbot: int = Field(description="Ile wartości z sejfu trafiło do chatbota (oczekiwane 0)")
     trail: list[dict[str, Any]] = Field(description="Zdarzenia audytu tury z polem zone; bez surowych wartości")
+
+
+class Comment(ApiModel):
+    id: int
+    conversation_id: str
+    event_id: Optional[int] = Field(description="Tura, której dotyczy komentarz; null = cała rozmowa")
+    author: str
+    text: str
+    time: datetime
+
+
+class CommentCreate(ApiModel):
+    text: str = Field(min_length=1, max_length=4000)
+    author: str = Field("QA", min_length=1, max_length=80)
+    event_id: Optional[int] = None
+
+
+class Conversation(ApiModel):
+    id: str
+    role: str
+    role_id: str
+    user: str
+    started_at: datetime
+    last_at: datetime
+    turn_count: int
+    level: Level = Field(description="Najwyższy poziom spośród tur rozmowy")
+    comment_count: int
+
+
+class ConversationTurn(EventDetail):
+    comments: list[Comment] = Field(default_factory=list, description="Komentarze dodane przy tej turze")
+
+
+class ConversationDetail(Conversation):
+    # Komentarze przed turami: w wyeksportowanym pliku są wtedy na początku rozmowy, a nie po
+    # kilkuset liniach kroków.
+    comments: list[Comment] = Field(description="Wszystkie komentarze rozmowy")
+    turns: list[ConversationTurn]
 
 
 class Stats(ApiModel):

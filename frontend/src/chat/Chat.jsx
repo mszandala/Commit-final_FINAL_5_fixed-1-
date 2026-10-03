@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Gauge } from 'lucide-react'
-import { endConversation, streamChat } from '../api'
+import { endConversation, resetBudget, streamChat } from '../api'
 import { refreshEvents } from '../events'
 import { useMeta } from '../meta'
 import ChatItem from './ChatItem'
 import Composer from './Composer'
 import Examples from './Examples'
 import UserMenu from './UserMenu'
+import { tightestLimit } from '../ui/BudgetBar'
 
 const BUDGET_WARNING = 0.8
 
+const BUDGET_NOTICE = {
+  tokens: (share) => (share < 1 ? `${Math.round(share * 100)}% of today's budget used` : "Today's budget is used up"),
+  spending: (share) => (share < 1 ? `${Math.round(share * 100)}% of the spending limit used` : 'Spending limit reached'),
+}
+
 let nextId = 1
 
-// `people` is GET /roles: each role with its example user and today's token budget.
+// `people` is GET /roles: each role with its example user and budget (daily tokens, total spending).
 export default function Chat({ people }) {
   const meta = useMeta()
   const [roleId, setRoleId] = useState('basic_user')
@@ -28,7 +34,7 @@ export default function Chat({ people }) {
 
   const person = people.find((p) => p.id === roleId)
   const account = budgets[roleId]
-  const share = account.used / account.limit
+  const { kind, share } = tightestLimit(account)
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -75,10 +81,27 @@ export default function Chat({ people }) {
     send(text)
   }
 
+  // Zeroes token and spending usage for one role, or for everyone when `id` is null.
+  async function clearUsage(id) {
+    try {
+      const roles = await resetBudget(id)
+      setBudgets(Object.fromEntries(roles.map((r) => [r.id, r.budget])))
+    } catch {
+      // The menu keeps showing the old figures; the next turn refreshes them.
+    }
+  }
+
   return (
     <section className="flex h-full flex-col bg-white">
       <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
-        <UserMenu people={people} roleId={roleId} account={account} disabled={!!pending} onSwitch={switchUser} />
+        <UserMenu
+          people={people}
+          roleId={roleId}
+          account={account}
+          disabled={!!pending}
+          onSwitch={switchUser}
+          onResetBudget={clearUsage}
+        />
       </header>
 
       <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
@@ -94,7 +117,7 @@ export default function Chat({ people }) {
         {share >= BUDGET_WARNING && (
           <p className={`flex items-center gap-1.5 text-[13px] ${share < 1 ? 'text-amber-text' : 'text-red-text'}`}>
             <Gauge size={14} />
-            {share < 1 ? `${Math.round(share * 100)}% of today's budget used` : "Today's budget is used up"}
+            {BUDGET_NOTICE[kind](share)}
           </p>
         )}
         <Composer disabled={!!pending} onSend={submit} />
