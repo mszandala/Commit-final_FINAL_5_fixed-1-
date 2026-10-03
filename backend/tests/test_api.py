@@ -38,6 +38,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", False)
     monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
+    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", False)   # kolejka odpowiedzi jest tylko dla chatbota
+    monkeypatch.setattr(pipeline, "REFUSAL_JUDGE_ENABLED", False)
     monkeypatch.setattr(refusal_detector, "REFUSAL_EMBEDDINGS_ENABLED", False)     # same słowa kluczowe, bez modelu
     monkeypatch.setattr(config, "SPENDING_DB", tmp_path / "spending.db")
     pipeline._detect_cached.cache_clear()
@@ -45,6 +47,7 @@ def env(tmp_path, monkeypatch):
     (tmp_path / "projects" / "alpha_README.md").write_text("Projekt alpha", encoding="utf-8")
     # testy nie zależą od klucza w .env: stały klucz także jako wartość startowa konfiguracji
     monkeypatch.setitem(state._DEFAULT_SETTINGS, "openrouter_api_key", "sk-or-v1-test-key-0000")
+    monkeypatch.setitem(state._DEFAULT_SETTINGS, "guard_mode", "warn")
     state.reset_state()
     state.reset_config()
     yield

@@ -39,7 +39,10 @@ PII_JUDGE_ENABLED = os.getenv("PII_JUDGE_ENABLED", "true").lower() == "true"
 PSEUDONYM_KEY = os.getenv("PSEUDONYM_KEY", "")
 
 # Tryb strażnika promptu: "warn" (ostrzega i przepuszcza) albo "block" (zatrzymuje zapytanie)
-PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "warn")
+PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "block")
+# Klasyfikator intencji (LLM, strefa bezpieczeństwa): czy zapytanie mieści się w pracy roli.
+# Włączony rozstrzyga zamiast słów kluczowych strażnika; wyłączony = decyduje sam strażnik regex.
+INTENT_CLASSIFIER_ENABLED = os.getenv("INTENT_CLASSIFIER_ENABLED", "true").lower() == "true"
 
 AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
 
@@ -128,6 +131,9 @@ REFUSAL_DETECTION_ENABLED = os.getenv("REFUSAL_DETECTION_ENABLED", "true").lower
 REFUSAL_EMBEDDINGS_ENABLED = os.getenv("REFUSAL_EMBEDDINGS_ENABLED", "true").lower() == "true"
 REFUSAL_MODEL = os.getenv("REFUSAL_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 REFUSAL_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.5"))
+# Sędzia LLM potwierdza odmowę; słowa kluczowe i podobieństwo (od niższego progu) tylko wskazują kandydata.
+REFUSAL_JUDGE_ENABLED = os.getenv("REFUSAL_JUDGE_ENABLED", "true").lower() == "true"
+REFUSAL_TRIGGER_THRESHOLD = float(os.getenv("REFUSAL_TRIGGER_THRESHOLD", "0.35"))
 
 # Ogólne reguły postępowania dla chatbota (decyzje kadrowe, dyskryminacja itp.). Warstwa nie zmienia
 # promptu systemowego chronionego chatbota — reguły dołącza do pierwszej wiadomości rozmowy.

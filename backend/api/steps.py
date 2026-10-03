@@ -7,6 +7,7 @@ from collections import Counter
 from typing import Optional
 
 from config import CONTROLS
+from security.intent_classifier import CATEGORIES as INTENT_CATEGORIES
 from security.refusal_detector import CATEGORIES as REFUSAL_CATEGORIES
 
 LEVELS = ["info", "warn", "block"]
@@ -14,6 +15,7 @@ LEVELS = ["info", "warn", "block"]
 # Rodzaje kroków (pole `kind`) i ich nazwy dla ludzi.
 STEP_KINDS = {
     "prompt_guard":   "Prompt guard",
+    "intent":         "Intent check",
     "company_policy": "Company policy",
     "prompt_masking": "Prompt masking",
     "pii_judge":      "PII judge",
@@ -34,7 +36,9 @@ ZONES = {
 
 _KIND_OF = {"llm_call": "model_call"}
 _POLICY_POINTS = {"input": "Prompt", "tool": "Tool arguments", "retrieval": "Tool result", "output": "Reply"}
-_PURPOSES = {"chat": "chatbot", "pii_judge": "PII judge", "company_policy_classifier": "policy classifier"}
+_PURPOSES = {"chat": "chatbot", "pii_judge": "PII judge", "pii_reply_judge": "PII reply judge",
+             "company_policy_classifier": "policy classifier", "intent_classifier": "intent classifier",
+             "refusal_judge": "refusal verifier"}
 
 
 def _counted(types: list) -> str:
@@ -53,6 +57,16 @@ def _prompt_guard(e: dict) -> tuple[str, str]:
     if e.get("decision") == "warn":
         return "warn", e.get("reason") or "Prompt flagged"
     return "info", "Prompt matches the role"
+
+
+def _intent(e: dict) -> tuple[str, str]:
+    if e.get("error"):
+        return "warn", f"Intent classifier gave no answer ({e['error']}); the keyword guard's decision stands"
+    category = e.get("category")
+    if category == "in_scope":
+        return "info", "The request is within the role's scope"
+    summary = f"{INTENT_CATEGORIES.get(category, category)}: {e.get('reason')}"
+    return ("block" if e.get("blocked") else "warn"), summary[0].upper() + summary[1:]
 
 
 def _company_policy(e: dict) -> tuple[str, str]:
@@ -140,12 +154,17 @@ def _output_filter(e: dict) -> tuple[str, str]:
 def _refusal(e: dict) -> tuple[str, str]:
     cause = (f"after rejected tool: {', '.join(e['after_denied_tools'])}" if e.get("after_denied_tools")
              else REFUSAL_CATEGORIES.get(e.get("category"), e.get("category")))
+    if e.get("confirmed") is False:
+        return "info", f"The reply looked like a refusal, but the verifier judged it an answer: {e.get('reason')}"
+    if e.get("method") == "llm":
+        return "warn", f"The chatbot declined the request ({cause}); confirmed by the verifier: {e.get('reason')}"
     how = "keywords" if e.get("method") == "keywords" else f"similarity to known refusals {e.get('score')}"
     return "warn", f"The chatbot declined the request ({cause}); detected by {how}"
 
 
 _DESCRIBE = {
     "prompt_guard": _prompt_guard,
+    "intent": _intent,
     "company_policy": _company_policy,
     "prompt_masking": _prompt_masking,
     "pii_judge": _pii_judge,

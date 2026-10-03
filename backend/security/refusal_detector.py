@@ -5,13 +5,18 @@ Chatbot nie zgłasza, że odmówił — rozpoznajemy to po treści, dwoma lokaln
   2. podobieństwo zdań odpowiedzi do wzorcowych odmów (embeddingi), gdy słowa kluczowe nic nie znalazły.
 Pomiar obu sygnałów: eval_refusals.py.
 """
+import json
 import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from config import REFUSAL_EMBEDDINGS_ENABLED, REFUSAL_MODEL, REFUSAL_THRESHOLD
+from chatbot import llm_client
+from config import REFUSAL_EMBEDDINGS_ENABLED, REFUSAL_MODEL, REFUSAL_THRESHOLD, REFUSAL_TRIGGER_THRESHOLD
+
+_JUDGE_PROMPT = (Path(__file__).parent / "prompts" / "refusal_judge.txt").read_text(encoding="utf-8")
+MAX_JUDGED_CHARS = 4000   # tyle znaków promptu i odpowiedzi widzi sędzia odmów
 
 KEYWORDS = re.compile(
     r"i(?:'m| am) sorry|i cannot|i can't|i am unable|i'm unable|not authorized|do(?:es)? not have (?:the )?(?:authorization|permission|ability|access)"
@@ -142,3 +147,45 @@ def detect_refusal(reply: str) -> Optional[dict]:
     if score is not None and score >= REFUSAL_THRESHOLD:
         return {"method": "embedding", "category": category, "score": round(score, 2)}
     return None
+
+
+def verify_refusal(prompt: str, reply: str) -> Optional[dict]:
+    """Sędzia LLM (strefa bezpieczeństwa): {"refusal", "category", "reason"} albo None, gdy nie odpowiedział
+    czytelnie."""
+    message = _JUDGE_PROMPT.format(prompt=prompt[:MAX_JUDGED_CHARS], reply=reply[:MAX_JUDGED_CHARS])
+    try:
+        answer = llm_client.chat([{"role": "user", "content": message}], zone="security", purpose="refusal_judge")
+        match = re.search(r"\{.*\}", answer.content or "", re.DOTALL)
+        parsed = json.loads(match.group(0)) if match else {}
+    except Exception:
+        return None
+    if not isinstance(parsed.get("refusal"), bool):
+        return None
+    category = parsed.get("category")
+    return {"refusal": parsed["refusal"], "category": category if category in CATEGORIES else "generic",
+            "reason": str(parsed.get("reason", "")).strip()[:200]}
+
+
+def assess_refusal(prompt: str, reply: str, denied_tools: bool = False, judge: bool = True) -> Optional[dict]:
+    """Ocena odmowy: słowa kluczowe i podobieństwo do wzorców tylko wskazują kandydata, rozstrzyga sędzia LLM.
+
+    Kandydatem jest odpowiedź ze słowem kluczowym, podobna do wzorca odmowy (niższy próg
+    REFUSAL_TRIGGER_THRESHOLD) albo udzielona po odrzuceniu narzędzia. Zwraca
+    {"refusal", "method", "category", "score", "reason"}; None, gdy odpowiedź nie jest kandydatem.
+    Gdy sędzia jest wyłączony albo nie odpowie, zostaje sama heurystyka (jak detect_refusal).
+    """
+    if not reply or not reply.strip():
+        return None
+    by_keywords = bool(KEYWORDS.search(reply))
+    nearest = _nearest(reply)
+    score, category = nearest if nearest else (None, "generic")
+    rounded = round(score, 2) if score is not None else None
+    candidate = by_keywords or denied_tools or (score is not None and score >= REFUSAL_TRIGGER_THRESHOLD)
+    if not candidate:
+        return None
+    judged = verify_refusal(prompt, reply) if judge else None
+    if judged:
+        return {"refusal": judged["refusal"], "method": "llm", "score": rounded, "reason": judged["reason"],
+                "category": judged["category"] if judged["refusal"] else category}
+    heuristic = detect_refusal(reply)
+    return {"refusal": True, "reason": "", **heuristic} if heuristic else None

@@ -25,9 +25,11 @@ from config import (
     CONDUCT_RULES_FILE,
     COLUMN_TYPES,
     DEFAULT_TOOL_RESULT_SCAN,
+    INTENT_CLASSIFIER_ENABLED,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
     REFUSAL_DETECTION_ENABLED,
+    REFUSAL_JUDGE_ENABLED,
     ROLES,
     SETTINGS,
     TOOL_RESULT_SCAN,
@@ -46,7 +48,8 @@ from security.common.verdicts import Verdict
 from security.masking import Vault, chatbot_action, label_for, role_policy
 from security.pii.pii_detector import detect_pii
 from security.pii.regex_detector import _luhn_ok, detect_regex_pii, in_decimal, is_date_like
-from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, detect_refusal
+from security.intent_classifier import CATEGORIES_PL as INTENT_CATEGORIES, IN_SCOPE, classify_intent
+from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, assess_refusal
 from security.pii_judge import judge_entities, judge_reply_entities
 from security.prompt_guard import check_prompt
 from security.tool_whitelist import ToolGate, role_areas
@@ -528,7 +531,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         # Ostrzeżenie strażnika zostaje obok decyzji innego etapu (np. redact), zamiast przez nią znikać.
         verdicts = [verdict] if verdict else []
         if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
-            verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)})
+            verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": guard_reason})
         if refusal and refusal is not verdict:
             verdicts.append(refusal)
         masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
@@ -539,16 +542,29 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     def block(stage_name, reason):
         return {"decision": "block", "stage": stage_name, "reason": reason}
 
-    # 1. Strażnik promptu (strefa bezpieczeństwa, dane surowe). W trybie "block" ostrzeżenie zatrzymuje turę.
+    # 1. Strażnik promptu (strefa bezpieczeństwa, dane surowe): wzorce regex jako pierwszy sygnał, potem
+    #    klasyfikator intencji. Gdy klasyfikator działa, to on rozstrzyga — słowa kluczowe same już tylko
+    #    ostrzegają, bo mylą się na zwykłych zapytaniach. W trybie "block" naruszenie zatrzymuje turę.
     stage(STAGE_REQUEST)
     guard = check_prompt(conv.role, user_message)
     flagged = guard.decision == "warn"
-    guard_blocks = guard.is_blocked or (flagged and SETTINGS.guard_mode == "block")
+    guard_reason = _clean(guard.reason) if flagged else None
+    block_mode = SETTINGS.guard_mode == "block"
+    guard_blocks = guard.is_blocked or (flagged and block_mode and not INTENT_CLASSIFIER_ENABLED)
     audit.record("prompt_guard", "security", decision=guard.decision, blocked=guard_blocks,
                  reason=_clean(guard.reason) if flagged or guard_blocks else None,
                  details={k: v for k, v in guard.details.items() if k != "warning"})
+    if INTENT_CLASSIFIER_ENABLED and not guard_blocks:
+        intent = classify_intent(conv.role, user_message, conv.user_texts, hint=guard_reason)
+        violation = intent["category"] not in (None, IN_SCOPE)
+        if violation:
+            detail = _logged_prompt(intent["reason"], threshold) if intent["reason"] else ""
+            guard_reason = INTENT_CATEGORIES[intent["category"]] + (f": {detail}" if detail else "")
+            flagged, guard_blocks = True, block_mode
+        audit.record("intent", "security", category=intent["category"], blocked=violation and block_mode,
+                     reason=guard_reason if violation else None, error=intent["error"])
     if guard_blocks:
-        reason = _clean(guard.reason)
+        reason = guard_reason or _clean(guard.reason)
         return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason),
                       _logged_prompt(user_message, threshold))
 
@@ -634,11 +650,15 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
             policy_note = {"decision": checked.decision, "stage": checked.stage, "reason": checked.reason}
 
     # Odmowa samego chatbota: warstwa niczego nie zablokowała, ale użytkownik nie dostał tego, o co prosił.
-    found = detect_refusal(raw_reply or "") if REFUSAL_DETECTION_ENABLED else None
+    # Słowa kluczowe i podobieństwo do wzorców tylko wskazują kandydata; rozstrzyga sędzia LLM.
+    denied = sorted({c["tool"] for c in gate.calls if not c["allowed"]})
+    found = (assess_refusal(user_message, raw_reply or "", denied_tools=bool(denied), judge=REFUSAL_JUDGE_ENABLED)
+             if REFUSAL_DETECTION_ENABLED else None)
     if found:
-        denied = sorted({c["tool"] for c in gate.calls if not c["allowed"]})
-        audit.record("refusal", "security", method=found["method"], category=found["category"],
-                     score=found["score"], after_denied_tools=denied)
+        audit.record("refusal", "security", confirmed=found["refusal"], method=found["method"],
+                     category=found["category"], score=found["score"], reason=found["reason"],
+                     after_denied_tools=denied)
+    if found and found["refusal"]:
         cause = f"po odrzuceniu narzędzia: {', '.join(denied)}" if denied else REFUSAL_CATEGORIES[found["category"]]
         refusal = {"decision": "refuse", "stage": "chatbot_refusal", "reason": f"Chatbot odmówił ({cause})"}
 
@@ -650,7 +670,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     elif policy_note and policy_note["decision"] == "redact":
         verdict = policy_note
     elif flagged:
-        verdict = {"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)}
+        verdict = {"decision": "warn", "stage": "prompt_guard", "reason": guard_reason}
     elif policy_note:
         verdict = policy_note
     elif refusal:
