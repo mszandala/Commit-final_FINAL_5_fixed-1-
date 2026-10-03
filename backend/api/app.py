@@ -13,11 +13,12 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import pipeline
 from api import schemas, state
 from api.steps import LEVELS, STEP_KINDS, ZONES
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -285,6 +286,8 @@ def events(after_id: Optional[int] = Query(None, alias="afterId", ge=0),
     rows = state.list_events(after_id, limit, decision)
     if min_level:
         rows = [e for e in rows if LEVELS.index(e["level"]) >= LEVELS.index(min_level)]
+    counts = store.comment_counts()
+    rows = [{**e, "comment_count": counts.get(e["conversation_id"], 0)} for e in rows]
     return rows if steps else [{**e, "steps": None} for e in rows]
 
 
@@ -325,6 +328,58 @@ async def _lifespan(app: FastAPI):
     state.load_events()
     threading.Thread(target=_warm_up, daemon=True).start()
     yield
+
+
+# --- zapisane rozmowy i komentarze -----------------------------------------------------------
+
+def _known_conversation(conversation_id: str) -> None:
+    if state.get_conversation(conversation_id) is None:
+        raise HTTPException(404, f"Nieznana rozmowa: {conversation_id}")
+
+
+@router.get("/conversations", response_model=list[schemas.Conversation], tags=["conversations"],
+            summary="Zapisane rozmowy, od najstarszej, z liczbą tur i komentarzy")
+def conversations():
+    return state.list_conversations()
+
+
+@router.get("/conversations/export", tags=["conversations"],
+            summary="Wszystkie zapisane rozmowy z turami, krokami i komentarzami jako plik JSON")
+def export_conversations():
+    data = [schemas.ConversationDetail(**state.get_conversation(c["id"])).model_dump(by_alias=True, mode="json")
+            for c in state.list_conversations()]
+    return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="conversations.json"'})
+
+
+@router.get("/conversations/{conversation_id}", response_model=schemas.ConversationDetail, tags=["conversations"],
+            summary="Jedna rozmowa: wszystkie tury z krokami oraz komentarze")
+def conversation(conversation_id: str):
+    _known_conversation(conversation_id)
+    return state.get_conversation(conversation_id)
+
+
+@router.get("/conversations/{conversation_id}/comments", response_model=list[schemas.Comment],
+            tags=["conversations"])
+def comments(conversation_id: str):
+    _known_conversation(conversation_id)
+    return store.list_comments(conversation_id)
+
+
+@router.post("/conversations/{conversation_id}/comments", response_model=schemas.Comment, status_code=201,
+             tags=["conversations"], summary="Dodaje komentarz do rozmowy (opcjonalnie do konkretnej tury)")
+def add_comment(conversation_id: str, comment: schemas.CommentCreate):
+    _known_conversation(conversation_id)
+    if comment.event_id is not None:
+        event = state.get_event(comment.event_id)
+        if event is None or event["conversation_id"] != conversation_id:
+            raise HTTPException(422, f"Tura {comment.event_id} nie należy do tej rozmowy")
+    return store.add_comment(conversation_id, comment.text.strip(), comment.author.strip(), comment.event_id)
+
+
+@router.delete("/comments/{comment_id}", status_code=204, tags=["conversations"])
+def delete_comment(comment_id: int):
+    if not store.delete_comment(comment_id):
+        raise HTTPException(404, f"Nieznany komentarz: {comment_id}")
 
 
 def create_app() -> FastAPI:

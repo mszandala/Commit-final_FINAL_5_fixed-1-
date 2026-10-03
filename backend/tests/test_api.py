@@ -9,6 +9,7 @@ import pipeline
 from api import state
 from api.app import app
 from audit import logger as audit_logger
+from audit import store
 from chatbot import llm_client
 from config import ROLES, SETTINGS
 from security import refusal_detector
@@ -33,6 +34,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(domain_helpers, "BASE_DIR", tmp_path)
     monkeypatch.setattr(audit_logger, "AUDIT_LOG", tmp_path / "events.jsonl")
     monkeypatch.setattr(audit_logger, "TURNS_LOG", tmp_path / "turns.jsonl")
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "conversations.db")
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", False)
     monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
@@ -461,3 +463,81 @@ def test_ordinary_reply_is_not_a_refusal(llm):
     llm += [_reply("W bazie nie znaleziono projektu o tej nazwie.")]
     body = _chat("lawyer", "Czy mamy projekt X?").json()
     assert body["verdict"] is None and client.get(f"{API}/events").json()[0]["decision"] == "Allowed"
+
+
+# --- baza rozmów i komentarze ----------------------------------------------------------------
+
+def test_conversations_are_stored_and_grouped(llm):
+    llm += [_reply("Zapisane."), _reply("Napisz do jan.kowalski@firma.pl"), _reply("ok")]
+    first = _chat("lawyer", "Pierwsze pytanie").json()
+    _chat("lawyer", "Drugie pytanie", first["conversationId"])
+    other = _chat("banker", "Inna rozmowa").json()
+
+    listed = client.get(f"{API}/conversations").json()
+    assert [(c["id"], c["turnCount"], c["roleId"]) for c in listed] == [
+        (first["conversationId"], 2, "lawyer"), (other["conversationId"], 1, "banker")]
+    assert listed[0]["level"] == "warn" and listed[0]["user"] == "Magdalena Kowalczyk"
+
+    detail = client.get(f"{API}/conversations/{first['conversationId']}").json()
+    assert [t["maskedPrompt"] for t in detail["turns"]] == ["Pierwsze pytanie", "Drugie pytanie"]
+    assert detail["turns"][1]["steps"][-1]["kind"] == "output_filter" and detail["comments"] == []
+    assert client.get(f"{API}/conversations/nie-ma").status_code == 404
+
+
+def test_comments_on_a_conversation(llm):
+    llm += [_reply("ok"), _reply("ok")]
+    first = _chat("lawyer", "Cześć").json()
+    other = _chat("banker", "Cześć").json()
+    base = f"{API}/conversations/{first['conversationId']}/comments"
+
+    created = client.post(base, json={"text": "  Strażnik powinien to zablokować.  "})
+    assert created.status_code == 201
+    comment = created.json()
+    assert (comment["text"], comment["author"], comment["eventId"]) == ("Strażnik powinien to zablokować.", "QA", None)
+    client.post(base, json={"text": "Dotyczy tej tury", "author": "Ola", "eventId": first["eventId"]})
+
+    assert [c["text"] for c in client.get(base).json()] == ["Strażnik powinien to zablokować.", "Dotyczy tej tury"]
+    rows = {e["conversationId"]: e["commentCount"] for e in client.get(f"{API}/events").json()}
+    assert rows == {first["conversationId"]: 2, other["conversationId"]: 0}
+    assert client.get(f"{API}/conversations").json()[0]["commentCount"] == 2
+
+    assert client.post(base, json={"text": ""}).status_code == 422
+    assert client.post(base, json={"text": "x", "eventId": other["eventId"]}).status_code == 422    # tura z innej rozmowy
+    assert client.post(f"{API}/conversations/nie-ma/comments", json={"text": "x"}).status_code == 404
+
+    assert client.delete(f"{API}/comments/{comment['id']}").status_code == 204
+    assert client.delete(f"{API}/comments/{comment['id']}").status_code == 404
+    assert [c["author"] for c in client.get(base).json()] == ["Ola"]
+
+
+def test_comments_and_turns_survive_restart(llm):
+    llm += [_reply("ok")]
+    body = _chat("lawyer", "Cześć").json()
+    client.post(f"{API}/conversations/{body['conversationId']}/comments", json={"text": "Do sprawdzenia"})
+    state.reset_state()
+    state.load_events()
+    detail = client.get(f"{API}/conversations/{body['conversationId']}").json()
+    assert len(detail["turns"]) == 1 and [c["text"] for c in detail["comments"]] == ["Do sprawdzenia"]
+
+
+def test_export_contains_turns_steps_and_comments(llm):
+    llm += [_reply("ok")]
+    body = _chat("lawyer", "Cześć").json()
+    client.post(f"{API}/conversations/{body['conversationId']}/comments", json={"text": "Uwaga QA"})
+    response = client.get(f"{API}/conversations/export")
+    assert "attachment" in response.headers["content-disposition"]
+    exported = response.json()
+    assert exported[0]["id"] == body["conversationId"] and exported[0]["comments"][0]["text"] == "Uwaga QA"
+    assert exported[0]["turns"][0]["steps"][0]["kind"] == "prompt_guard"
+
+
+def test_old_turns_file_is_imported_once(llm, tmp_path):
+    llm += [_reply("ok")]
+    body = _chat("lawyer", "Cześć").json()
+    row = dict(state.get_event(body["eventId"]))
+    store.clear()                                                    # pusta baza, jak przy pierwszym starcie po zmianie
+    (tmp_path / "turns.jsonl").write_text(json.dumps({**row, "time": row["time"].isoformat()}, default=str) + "\n",
+                                          encoding="utf-8")
+    state.reset_state()
+    state.load_events()
+    assert [e["id"] for e in client.get(f"{API}/events").json()] == [body["eventId"]]

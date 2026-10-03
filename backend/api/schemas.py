@@ -162,6 +162,7 @@ class Event(ApiModel):
     reason: str
     level: Level = Field(description="Najwyższy poziom spośród kroków tury")
     step_count: int
+    comment_count: int = Field(0, description="Liczba komentarzy do rozmowy, do której należy tura")
     steps: Optional[list[Step]] = Field(None, description="Kroki tury; w liście tylko przy ?steps=true")
     masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota")
     masked_for_model: list[str] = Field(description="Typy danych z promptu ukryte przed chatbotem")
@@ -175,6 +176,38 @@ class EventDetail(Event):
     tools: list[ToolCall]
     leaks_to_chatbot: int = Field(description="Ile wartości z sejfu trafiło do chatbota (oczekiwane 0)")
     trail: list[dict[str, Any]] = Field(description="Zdarzenia audytu tury z polem zone; bez surowych wartości")
+
+
+class Comment(ApiModel):
+    id: int
+    conversation_id: str
+    event_id: Optional[int] = Field(description="Tura, której dotyczy komentarz; null = cała rozmowa")
+    author: str
+    text: str
+    time: datetime
+
+
+class CommentCreate(ApiModel):
+    text: str = Field(min_length=1, max_length=4000)
+    author: str = Field("QA", min_length=1, max_length=80)
+    event_id: Optional[int] = None
+
+
+class Conversation(ApiModel):
+    id: str
+    role: str
+    role_id: str
+    user: str
+    started_at: datetime
+    last_at: datetime
+    turn_count: int
+    level: Level = Field(description="Najwyższy poziom spośród tur rozmowy")
+    comment_count: int
+
+
+class ConversationDetail(Conversation):
+    turns: list[EventDetail]
+    comments: list[Comment]
 
 
 class Stats(ApiModel):

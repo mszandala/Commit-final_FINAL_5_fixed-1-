@@ -1,8 +1,10 @@
 import { Fragment, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronRight, Search } from 'lucide-react'
+import { ChevronRight, Download, MessageSquare, Search } from 'lucide-react'
+import { EXPORT_URL } from '../api'
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
 import { useMeta } from '../meta'
+import Comments from './Comments'
 
 // The backend grades every turn and every step: info (nothing to report), warn (flagged or
 // data hidden) and block. A turn takes the highest level among its steps.
@@ -150,7 +152,16 @@ export default function Logs() {
         >
           {expandAll ? 'Collapse all' : 'Expand all'}
         </button>
-        <label className="relative ml-auto block w-64">
+        <a
+          href={EXPORT_URL}
+          download="conversations.json"
+          title="Download all saved conversations with steps and comments"
+          className="ml-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-grey hover:bg-white hover:text-ink"
+        >
+          <Download size={14} />
+          Export
+        </a>
+        <label className="relative block w-48">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-grey" />
           <input
             value={query}
@@ -229,6 +240,12 @@ export default function Logs() {
                               ),
                           )}
                           {e.stepCount}
+                          {e.commentCount > 0 && (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 text-grey" title="Comments on this conversation">
+                              <MessageSquare size={12} />
+                              {e.commentCount}
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
@@ -252,6 +269,7 @@ export default function Logs() {
                               {steps.length} of {e.steps.length} steps match the filters
                             </p>
                           )}
+                          <Comments conversationId={e.conversationId} eventId={e.id} />
                         </td>
                       </tr>
                     )}

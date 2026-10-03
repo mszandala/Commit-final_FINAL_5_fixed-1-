@@ -235,7 +235,24 @@ z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
 - `atMs` to czas od początku tury, `durationMs` — czas od poprzedniego kroku.
 - `details` to pełne zdarzenie audytu, bez surowych wartości wrażliwych.
 
-Log jest zapisywany w `backend/audit/turns.jsonl` i wczytywany przy starcie serwera.
+Log jest zapisywany w bazie rozmów (niżej) i wczytywany przy starcie serwera.
+
+### Zapisane rozmowy i komentarze
+
+Tury są zapisywane w bazie `backend/audit/conversations.db` (SQLite) i pogrupowane w rozmowy po
+`conversationId`. Treści mają tę samą, zamaskowaną postać co w logu.
+
+| Metoda | Ścieżka | Do czego |
+|---|---|---|
+| GET | `/conversations` | lista rozmów: rola, użytkownik, czas, liczba tur, poziom, liczba komentarzy |
+| GET | `/conversations/{id}` | jedna rozmowa: tury z krokami i komentarze |
+| GET | `/conversations/export` | wszystkie rozmowy z turami, krokami i komentarzami jako plik JSON |
+| GET | `/conversations/{id}/comments` | komentarze rozmowy |
+| POST | `/conversations/{id}/comments` | nowy komentarz: `{ "text": "...", "author": "QA", "eventId": 12 }` |
+| DELETE | `/comments/{id}` | usunięcie komentarza |
+
+`author` (domyślnie „QA") i `eventId` (tura, której dotyczy uwaga) są opcjonalne. Wiersze
+`GET /events` mają `commentCount` — liczbę komentarzy do rozmowy, do której należy tura.
 
 `GET /stats`:
 
@@ -247,6 +264,7 @@ Log jest zapisywany w `backend/audit/turns.jsonl` i wczytywany przy starcie serw
 ## Czego w v1 nie ma
 
 - **Załączniki.** Composer pozwala dodać pliki, ale backend nie ma jeszcze ich obsługi.
-- **Trwałość konfiguracji i rozmów.** Znikają po restarcie serwera; zostają log (`audit/turns.jsonl`,
-  `audit/events.jsonl`) i budżety (`spending.db`).
+- **Trwałość konfiguracji i kontekstu rozmowy.** Zmiany konfiguracji i historia, którą widzi model,
+  znikają po restarcie serwera; zostają zapisane rozmowy (`audit/conversations.db`), log zdarzeń
+  (`audit/events.jsonl`) i budżety (`spending.db`).
 - **Uwierzytelnianie.** Każdy klient może wybrać dowolną rolę i zmienić konfigurację.

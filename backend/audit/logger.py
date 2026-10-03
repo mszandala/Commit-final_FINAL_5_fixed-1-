@@ -5,8 +5,8 @@ from typing import Optional
 
 from config import AUDIT_LOG
 
-# Podsumowania tur dla API (jeden wiersz logu na turę, razem ze śladem); z tego pliku log
-# w interfejsie odtwarza się po restarcie serwera.
+# Dawny zapis podsumowań tur. Tury są teraz w bazie (audit/store.py); plik służy już tylko do
+# jednorazowego przeniesienia starszych wpisów.
 TURNS_LOG = AUDIT_LOG.with_name("turns.jsonl")
 
 # Zdarzenia bieżącej tury; pipeline ustawia kolektor, a moduły dopisują do niego przez record().
@@ -48,13 +48,6 @@ def flush(events: list, **common) -> None:
     with open(AUDIT_LOG, "a", encoding="utf-8") as f:
         for event in events:
             f.write(json.dumps({**common, **event}, ensure_ascii=False) + "\n")
-
-
-def append_turn(row: dict) -> None:
-    """Dopisuje podsumowanie tury (wiersz logu API) do pliku."""
-    TURNS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(TURNS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
 
 
 def load_turns(limit: int = 2000) -> list[dict]:

@@ -10,7 +10,7 @@ from typing import Optional
 
 import pipeline
 from api.steps import build_steps, turn_level
-from audit import logger as audit_logger
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -106,8 +106,8 @@ _events_lock = threading.Lock()
 
 
 def load_events() -> None:
-    """Wczytuje log z pliku (start serwera), żeby przetrwał restart."""
-    rows = audit_logger.load_turns()
+    """Wczytuje log z bazy rozmów (start serwera), żeby przetrwał restart."""
+    rows = store.load_turns()
     for row in rows:
         row["time"] = datetime.fromisoformat(row["time"])
     with _events_lock:
@@ -181,7 +181,7 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "steps": steps,
         }
         _events.append(event)
-        audit_logger.append_turn({**event, "time": event["time"].isoformat()})
+        store.add_turn({**event, "time": event["time"].isoformat()})
         return event
 
 
@@ -195,6 +195,37 @@ def list_events(after_id: Optional[int] = None, limit: int = 200, decision: Opti
 def get_event(event_id: int) -> Optional[dict]:
     with _events_lock:
         return next((e for e in _events if e["id"] == event_id), None)
+
+
+def list_conversations() -> list[dict]:
+    """Rozmowy z logu, od najstarszej: podsumowanie tur i liczba komentarzy."""
+    counts = store.comment_counts()
+    with _events_lock:
+        rows = list(_events)
+    grouped: dict[str, list[dict]] = {}
+    for event in rows:
+        grouped.setdefault(event["conversation_id"], []).append(event)
+    levels = ["info", "warn", "block"]
+    return [{
+        "id": conversation_id,
+        "role": turns[0]["role"],
+        "role_id": turns[0]["role_id"],
+        "user": turns[0]["user"],
+        "started_at": turns[0]["time"],
+        "last_at": turns[-1]["time"],
+        "turn_count": len(turns),
+        "level": max((t["level"] for t in turns), key=levels.index),
+        "comment_count": counts.get(conversation_id, 0),
+    } for conversation_id, turns in grouped.items()]
+
+
+def get_conversation(conversation_id: str) -> Optional[dict]:
+    summary = next((c for c in list_conversations() if c["id"] == conversation_id), None)
+    if summary is None:
+        return None
+    with _events_lock:
+        turns = [e for e in _events if e["conversation_id"] == conversation_id]
+    return {**summary, "turns": turns, "comments": store.list_comments(conversation_id)}
 
 
 def reset_state() -> None:
