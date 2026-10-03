@@ -43,3 +43,19 @@ def test_empty_prompt_passes():
     verdict = check_prompt("basic_user", "   ")
     assert verdict.decision == "pass"
     assert not verdict.is_blocked
+
+
+def test_resource_access_follows_allowed_tools():
+    # Każda rola z narzędziami danego zasobu przechodzi, pozostałe dostają ostrzeżenie.
+    assert check_prompt("bankier", "Pokaż credit score klienta 15634602").decision == "pass"
+    assert check_prompt("kadry", "Pokaż credit score klienta 15634602").decision == "warn"
+    assert check_prompt("pm", "Notowania AAPL na NASDAQ z 2020").decision == "pass"
+    assert check_prompt("prawnik", "Notowania AAPL na NASDAQ z 2020").decision == "warn"
+    assert check_prompt("prawnik", "Streść earnings call Apple z 2019 Q2").decision == "pass"
+
+
+def test_config_change_is_reflected_without_code_change(monkeypatch):
+    from config import ROLES
+    monkeypatch.setitem(ROLES["podstawowy użytkownik"], "allowed_tools",
+                        ROLES["podstawowy użytkownik"]["allowed_tools"] + ["read_employee_records"])
+    assert check_prompt("basic_user", "Pokaż zarobki w dziale Sales").decision == "pass"

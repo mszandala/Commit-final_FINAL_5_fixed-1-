@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from config import ROLES
+from config import RESOURCE_TOOLS, ROLES
 from security.verdicts import Verdict
 
 ROLE_ALIASES = {
@@ -36,24 +36,34 @@ INJECTION_PATTERNS = [
     (r"(?:jestem adminem|i am (?:the )?admin|bypass (?:all )?restrictions|bez ograniczeń)", "Wykryto próbę podszywania się pod administratora lub obejścia zasad"),
 ]
 
-# Słowa kluczowe wrażliwych zasobów do sprawdzania uprawnień roli
+# Słowa kluczowe (rdzenie, bo polska odmiana) wskazujące zasób z config.RESOURCE_TOOLS.
 RESOURCE_KEYWORDS = {
     "employee_data": [
-        "salary", "salaries", "pensje", "wynagrodzenia", "zarobki", "payroll",
-        "employee record", "staff id", "dane pracownik", "bonus table",
+        "salary", "salaries", "payroll", "monthlyincome", "monthly income", "employee", "attrition",
+        "pensj", "wynagrodze", "zarob", "pracowni", "kadr", "rotacj",
     ],
     "client_data": [
-        "client file", "litigation clients", "signed agreements", "akty notarialne",
-        "dane klient", "umowy klient", "kyc",
+        "customer", "client", "credit score", "credit_score", "churn",
+        "klient", "scoring", "saldo", "salda",
     ],
-    "bank_data": [
-        "operating accounts", "nightly reconciliation", "rachunki operacyjne",
-        "rezerwy banku", "internal ledger", "salda wewnętrzne",
+    "bank_campaigns": [
+        "campaign", "term deposit", "kampani", "lokat",
     ],
-    "stock_market": [
-        "trading volume", "closing prices", "notowania", "brokerage order",
-        "trading positions", "portfel akcji", "earnings call",
+    "stock_prices": [
+        "stock price", "closing price", "trading volume", "ticker", "nasdaq", "nyse",
+        "notowa", "kurs akcji", "kursy akcji", "giełd",
     ],
+    "earnings_calls": [
+        "earnings call", "transcript", "telekonferencj", "transkrypcj",
+    ],
+}
+
+RESOURCE_LABELS = {
+    "employee_data":  "danych kadrowych i płacowych",
+    "client_data":    "danych klientów banku",
+    "bank_campaigns": "danych kampanii bankowych",
+    "stock_prices":   "notowań giełdowych",
+    "earnings_calls": "transkrypcji telekonferencji wynikowych",
 }
 
 
@@ -72,31 +82,15 @@ def _check_heuristic_injections(text: str) -> Optional[str]:
 
 
 def _check_role_resource_access(canonical_role: str, text: str) -> Optional[tuple[str, str]]:
-    """Sprawdza, czy zapytanie odpytuje o zasób niezgodny z zakresem roli."""
-    role_cfg = ROLES.get(canonical_role, {})
-    allowed_tools = role_cfg.get("allowed_tools", [])
+    """Sprawdza, czy zapytanie dotyczy zasobu, którego narzędzi rola nie ma w allowed_tools."""
+    allowed_tools = set(ROLES.get(canonical_role, {}).get("allowed_tools", []))
     text_lower = text.lower()
 
-    # Sprawdzenie danych kadrowych (employee_data)
-    if any(k in text_lower for k in RESOURCE_KEYWORDS["employee_data"]):
-        if canonical_role not in ("kadry", "administrator") and not any("employee" in t or "hr" in t for t in allowed_tools):
-            return "employee_data", f"Rola '{canonical_role}' nie ma dostępu do danych kadrowych i płacowych."
-
-    # Sprawdzenie danych klientów bankowych (client_data)
-    if any(k in text_lower for k in RESOURCE_KEYWORDS["client_data"]):
-        if canonical_role not in ("bankier", "administrator") and not any("client" in t for t in allowed_tools):
-            return "client_data", f"Rola '{canonical_role}' nie ma dostępu do danych klientów."
-
-    # Sprawdzenie wewnętrznych kont banku (bank_data)
-    if any(k in text_lower for k in RESOURCE_KEYWORDS["bank_data"]):
-        if canonical_role not in ("bankier", "analityk", "administrator") and not any("bank" in t for t in allowed_tools):
-            return "bank_data", f"Rola '{canonical_role}' nie ma dostępu do wewnętrznych operacji bankowych."
-
-    # Sprawdzenie danych giełdowych (stock_market)
-    if any(k in text_lower for k in RESOURCE_KEYWORDS["stock_market"]):
-        if canonical_role not in ("analityk", "Portfolio Manager", "prawnik", "administrator") and not any("market" in t or "earnings" in t or "stock" in t for t in allowed_tools):
-            return "stock_market", f"Rola '{canonical_role}' nie ma dostępu do danych giełdowych."
-
+    for resource, keywords in RESOURCE_KEYWORDS.items():
+        if not any(k in text_lower for k in keywords):
+            continue
+        if not allowed_tools & set(RESOURCE_TOOLS[resource]):
+            return resource, f"Rola '{canonical_role}' nie ma dostępu do {RESOURCE_LABELS[resource]}."
     return None
 
 

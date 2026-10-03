@@ -7,7 +7,8 @@ class Verdict:
     """Wspólna struktura wyniku oceny dla strażników i sędziów w warstwie bezpieczeństwa.
 
     Atrybuty:
-        decision: Wynik decyzji - "pass" (zezwolono), "warn" (ostrzeżenie), "block" (odmowa/blokada).
+        decision: Wynik decyzji - "pass" (zezwolono), "warn" (ostrzeżenie), "redact" (zamaskowano fragmenty),
+            "block" (odmowa/blokada).
         reason: Uzasadnienie decyzji dla audytu i użytkownika.
         stage: Nazwa etapu oceny ("prompt_guard", "tool_whitelist", "tool_violation_judge", "pii_access_judge").
         details: Dodatkowe metadane (wykryte encje, brakujące uprawnienia, flagi podejrzliwości).
