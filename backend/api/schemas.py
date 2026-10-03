@@ -164,7 +164,10 @@ class Event(ApiModel):
     step_count: int
     comment_count: int = Field(0, description="Liczba komentarzy do rozmowy, do której należy tura")
     steps: Optional[list[Step]] = Field(None, description="Kroki tury; w liście tylko przy ?steps=true")
-    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota")
+    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota; dla tury zablokowanej przed "
+                                           "modelem — prompt z wartościami wrażliwymi zamienionymi na etykiety")
+    reply: str = Field("", description="Odpowiedź chatbota z wartościami wrażliwymi zamienionymi na etykiety; "
+                                       "pusta, gdy model nie odpowiedział")
     masked_for_model: list[str] = Field(description="Typy danych z promptu ukryte przed chatbotem")
     model: Optional[str] = Field(description="Model chatbota w tej turze; null, gdy nie był wołany")
     tokens: int
@@ -205,9 +208,15 @@ class Conversation(ApiModel):
     comment_count: int
 
 
+class ConversationTurn(EventDetail):
+    comments: list[Comment] = Field(default_factory=list, description="Komentarze dodane przy tej turze")
+
+
 class ConversationDetail(Conversation):
-    turns: list[EventDetail]
-    comments: list[Comment]
+    # Komentarze przed turami: w wyeksportowanym pliku są wtedy na początku rozmowy, a nie po
+    # kilkuset liniach kroków.
+    comments: list[Comment] = Field(description="Wszystkie komentarze rozmowy")
+    turns: list[ConversationTurn]
 
 
 class Stats(ApiModel):

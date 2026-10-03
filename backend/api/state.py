@@ -175,6 +175,7 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "tokens": result.tokens if result else 0,
             "latency_ms": result.latency_ms if result else 0,
             "masked_prompt": result.masked_prompt if result else "",
+            "reply": next((e.get("reply") or "" for e in trail if e["type"] == "turn"), ""),
             "tools": tools,
             "leaks_to_chatbot": result.leaks_to_chatbot if result else 0,
             "trail": trail,
@@ -223,9 +224,11 @@ def get_conversation(conversation_id: str) -> Optional[dict]:
     summary = next((c for c in list_conversations() if c["id"] == conversation_id), None)
     if summary is None:
         return None
+    comments = store.list_comments(conversation_id)
     with _events_lock:
-        turns = [e for e in _events if e["conversation_id"] == conversation_id]
-    return {**summary, "turns": turns, "comments": store.list_comments(conversation_id)}
+        turns = [{**e, "comments": [c for c in comments if c["event_id"] == e["id"]]}
+                 for e in _events if e["conversation_id"] == conversation_id]
+    return {**summary, "comments": comments, "turns": turns}
 
 
 def reset_state() -> None:

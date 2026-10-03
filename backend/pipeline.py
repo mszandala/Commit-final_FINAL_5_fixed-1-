@@ -214,6 +214,15 @@ def _label_sensitive(text: str, entities: list[dict]) -> str:
                           lambda e: label_for(e["type"]))
 
 
+def _logged_prompt(prompt: str, threshold: Optional[float]) -> str:
+    """Prompt tury zatrzymanej przed modelem, w postaci nadającej się do logu.
+
+    Taka tura nie dochodzi do maskowania, a bez treści promptu nie da się potem ustalić, co zostało
+    zablokowane. Wartości wrażliwe są zamieniane na etykiety typu, jak w reszcie logu.
+    """
+    return _label_sensitive(prompt, _detect(prompt, threshold))
+
+
 def mask_prompt(conv: Conversation, prompt: str, threshold: Optional[float] = None) -> tuple[str, list, bool]:
     """Maskuje prompt przed wysłaniem do chatbota. Zwraca (prompt, encje z decyzjami, czy blokada)."""
     entities = _detect(prompt, threshold)
@@ -479,7 +488,8 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
                  details={k: v for k, v in guard.details.items() if k != "warning"})
     if guard_blocks:
         reason = _clean(guard.reason)
-        return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason))
+        return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason),
+                      _logged_prompt(user_message, threshold))
 
     # 2. Regulaminy firmowe na surowym prompcie: blokada, ukrycie fragmentu albo ostrzeżenie
     engine = policy_engine()
@@ -489,7 +499,8 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         checked = engine.check_input(conv.role, user_message)
         _policy_check("input", checked)
         if checked.decision == "block":
-            return finish(f"Zapytanie zostało zablokowane: {checked.reason}", block(checked.stage, checked.reason))
+            return finish(f"Zapytanie zostało zablokowane: {checked.reason}", block(checked.stage, checked.reason),
+                          _logged_prompt(user_message, threshold))
         if checked.decision == "redact":
             prompt = checked.details.get("redacted_text") or user_message
         if checked.decision in ("redact", "warn"):
