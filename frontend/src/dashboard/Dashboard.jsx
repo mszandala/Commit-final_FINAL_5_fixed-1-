@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { ArrowLeft, Settings } from 'lucide-react'
 import cat from '../assets/cat.jpg'
 import Logs from './Logs'
 
@@ -30,14 +29,13 @@ export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
           ))}
         </nav>
         <button
-          aria-label={configOpen ? 'Back' : 'Config'}
           aria-pressed={configOpen}
           onClick={() => (configOpen ? onLeaveConfig() : onOpenConfig())}
-          className={`my-auto ml-auto grid size-8 place-items-center rounded-md ${
+          className={`my-auto ml-auto rounded-md px-3 py-1.5 text-sm ${
             configOpen ? 'bg-navy text-white' : 'text-grey hover:bg-page hover:text-ink'
           }`}
         >
-          {configOpen ? <ArrowLeft size={18} /> : <Settings size={18} />}
+          Config
         </button>
       </header>
       <div role="tabpanel" className="min-h-0 flex-1">

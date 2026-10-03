@@ -126,7 +126,7 @@ export default function App() {
         </div>
         {/* Covers both panes below their headers; the panes stay mounted so chat and tabs keep their state. */}
         {configOpen && (
-          <div className="absolute inset-x-0 bottom-0 top-14 bg-page">
+          <div className="absolute inset-x-0 bottom-0 top-14 z-20 bg-page">
             <Config
               config={draft}
               dirty={dirty}

@@ -1,10 +1,12 @@
-import { Fragment, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronRight, Download, MessageSquare, Search } from 'lucide-react'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { ChevronRight, Download, MessageSquare } from 'lucide-react'
 import { EXPORT_URL } from '../api'
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
 import { useMeta } from '../meta'
 import Comments from './Comments'
+import SearchBox from './SearchBox'
+import { advancedMatcher, plainMatcher } from './search'
 
 // The backend grades every turn and every step: info (nothing to report), warn (flagged or
 // data hidden) and block. A turn takes the highest level among its steps.
@@ -56,7 +58,7 @@ function Select({ label, value, onChange, options }) {
       aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-blue"
+      className="shrink-0 rounded-md border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-blue"
     >
       <option value="all">{label}: all</option>
       {Object.entries(options).map(([id, name]) => (
@@ -68,13 +70,17 @@ function Select({ label, value, onChange, options }) {
   )
 }
 
-function Step({ step, zones }) {
+// `found`: the search matched this step and not all of its turn's steps.
+function Step({ step, zones, found }) {
   return (
     <details className="group">
       <summary
-        className={`flex list-none items-baseline gap-2.5 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${TINTS[step.level]}`}
+        className={`flex cursor-pointer list-none items-baseline gap-2 rounded-sm py-1 pl-3 pr-2 [&::-webkit-details-marker]:hidden ${BARS[step.level]} ${
+          found ? 'bg-blue-light/40' : TINTS[step.level]
+        }`}
         title={LEVEL_NAMES[step.level]}
       >
+        <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
         <span className="sr-only">{LEVEL_NAMES[step.level]}: </span>
         <span className="w-32 shrink-0 text-ink">{step.label}</span>
         <span className={`w-24 shrink-0 rounded-sm px-1.5 py-px text-center text-xs text-ink ${ZONE_TAGS[step.zone] ?? 'bg-page'}`}>
@@ -82,7 +88,6 @@ function Step({ step, zones }) {
         </span>
         <span className={`min-w-0 flex-1 break-words ${STEP_TEXT[step.level]}`}>{step.summary}</span>
         <span className="shrink-0 text-grey">{formatNumber(step.durationMs)} ms</span>
-        <ChevronRight size={14} className="shrink-0 self-center text-grey transition-transform group-open:rotate-90" />
       </summary>
       <pre className="mb-1.5 ml-3 mt-1 whitespace-pre-wrap break-words rounded-md bg-page px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink">
         {JSON.stringify(step.details, null, 2)}
@@ -97,42 +102,64 @@ export default function Logs() {
   const [kind, setKind] = useState('all')
   const [zone, setZone] = useState('all')
   const [query, setQuery] = useState('')
+  const [advanced, setAdvanced] = useState(false)
   // Turns opened or closed by hand; the rest follow `expandAll`.
   const [toggled, setToggled] = useState({})
   const [expandAll, setExpandAll] = useState(false)
 
   const scroller = useRef(null)
 
-  const needle = query.trim().toLowerCase()
   const all = useSyncExternalStore(subscribeEvents, getEvents)
+
+  // While an advanced query is half typed or wrong, the table keeps the last results that worked
+  // in this mode, or shows everything right after a switch.
+  const result = useMemo(
+    () => (advanced ? advancedMatcher(query, meta) : plainMatcher(query, meta)),
+    [advanced, query, meta],
+  )
+  const everything = useMemo(() => plainMatcher('', meta), [meta])
+  const [kept, setKept] = useState({ advanced, result })
+  if (!result.error && result !== kept.result) setKept({ advanced, result })
+  const search = kept.advanced === advanced ? kept.result : everything
+
+  // Turns where the search found some steps but not all open on them, with those steps marked.
+  // An empty query finds every step, so nothing is marked.
+  const found = useMemo(() => {
+    const map = new Map()
+    for (const e of all) {
+      const hits = e.steps.filter((s) => search.matchStep(e, s))
+      if (hits.length && hits.length < e.steps.length) map.set(e.id, new Set(hits))
+    }
+    return map
+  }, [all, search])
 
   // With a step type or zone chosen, a turn is listed when one of its steps matches, and only
   // those steps are shown under it.
   const narrowed = kind !== 'all' || zone !== 'all'
   const stepMatches = (s) =>
     RANK[s.level] >= RANK[level] && (kind === 'all' || s.kind === kind) && (zone === 'all' || s.zone === zone)
-  const events = all.filter((e) => {
-    const text = `${e.user} ${e.role} ${e.control} ${e.reason} ${e.steps.map((s) => s.summary).join(' ')}`
-    if (needle && !text.toLowerCase().includes(needle)) return false
-    return narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]
-  })
-  const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed)
+  const events = all.filter(
+    (e) => search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]),
+  )
+  const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed || found.has(e.id))
 
   // Newest events are at the bottom, so keep the view there.
   useLayoutEffect(() => {
     scroller.current.scrollTop = scroller.current.scrollHeight
-  }, [level, kind, zone, needle, all])
+  }, [level, kind, zone, search, all])
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4">
-        <div role="group" aria-label="Level" className="flex gap-1">
+      {/* Advanced search takes the whole first row and pushes the filters below it. Plain search
+          moves to its own row only when the window is too narrow for it. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 px-6 py-4">
+        <div role="group" aria-label="Level" className="flex shrink-0 gap-1">
           {LEVELS.map((l) => (
             <button
               key={l.id}
               aria-pressed={level === l.id}
               onClick={() => setLevel(l.id)}
-              className={`rounded-md px-2.5 py-1 text-sm ${
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${
                 level === l.id ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
               }`}
             >
@@ -148,7 +175,7 @@ export default function Logs() {
             setExpandAll(!expandAll)
             setToggled({})
           }}
-          className={`rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
+          className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
         >
           {expandAll ? 'Collapse all' : 'Expand all'}
         </button>
@@ -156,25 +183,24 @@ export default function Logs() {
           href={EXPORT_URL}
           download="conversations.json"
           title="Download all saved conversations with steps and comments"
-          className="ml-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-grey hover:bg-white hover:text-ink"
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm text-grey hover:bg-white hover:text-ink"
         >
           <Download size={14} />
           Export
         </a>
-        <label className="relative block w-48">
-          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-grey" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            aria-label="Search logs"
-            className="w-full rounded-md border border-line bg-white py-1.5 pl-8 pr-2.5 text-sm outline-none focus:border-blue"
-          />
-        </label>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          advanced={advanced}
+          onToggle={() => setAdvanced(!advanced)}
+          error={result.error}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
-        <div ref={scroller} className="min-h-0 overflow-auto rounded-md border border-line bg-white">
+        {/* `relative` keeps the absolutely placed sr-only labels inside the scroller; without it they
+            stretch the page once rows are open. */}
+        <div ref={scroller} className="relative min-h-0 overflow-auto rounded-md border border-line bg-white">
           <table className="w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
             <thead>
               <tr>
@@ -256,12 +282,12 @@ export default function Logs() {
                         <td colSpan={COLUMNS.length} className="border-b border-line bg-page/60 py-2 pl-9 pr-4">
                           {e.maskedPrompt && (
                             <p className="mb-1.5 pl-3 text-[13px] text-grey">
-                              Sent to the model: <span className="font-mono text-[12.5px] text-ink">{e.maskedPrompt}</span>
+                              Sent to the model:<span className="ml-1.5 font-mono text-[12.5px] text-ink">{e.maskedPrompt}</span>
                             </p>
                           )}
                           <div className="space-y-px text-[13px]">
                             {steps.map((s) => (
-                              <Step key={s.index} step={s} zones={meta.zones} />
+                              <Step key={s.index} step={s} zones={meta.zones} found={found.get(e.id)?.has(s)} />
                             ))}
                           </div>
                           {steps.length < e.steps.length && (

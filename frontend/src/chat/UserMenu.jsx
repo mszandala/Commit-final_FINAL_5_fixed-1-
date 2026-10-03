@@ -23,19 +23,14 @@ export default function UserMenu({ people, roleId, account, disabled, onSwitch, 
       {(close) => (
         <>
           <div className="border-b border-line px-3.5 py-3">
-            <BudgetBar used={account.used} limit={account.limit} />
-            <div className="mt-2 flex items-center justify-between text-[13px] text-grey">
-              <span>
-                Spent ${account.spent.toFixed(4)} of ${account.spendingLimit.toFixed(2)}
-              </span>
-              <span className="flex gap-3">
-                <button disabled={disabled} onClick={() => onResetBudget(roleId)} className="hover:text-ink disabled:opacity-50">
-                  Reset usage
-                </button>
-                <button disabled={disabled} onClick={() => onResetBudget(null)} className="hover:text-ink disabled:opacity-50">
-                  Reset all
-                </button>
-              </span>
+            <BudgetBar {...account} />
+            <div className="mt-2 flex justify-end gap-3 text-[13px] text-grey">
+              <button disabled={disabled} onClick={() => onResetBudget(roleId)} className="hover:text-ink disabled:opacity-50">
+                Reset usage
+              </button>
+              <button disabled={disabled} onClick={() => onResetBudget(null)} className="hover:text-ink disabled:opacity-50">
+                Reset all
+              </button>
             </div>
           </div>
           <ul className="p-1.5">
