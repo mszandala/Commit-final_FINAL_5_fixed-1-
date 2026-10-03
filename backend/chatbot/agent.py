@@ -23,13 +23,17 @@ _current_tool_gate: ContextVar[Optional[ToolGate]] = ContextVar(
     default=None,
 )
 
+_max_agent_depth: ContextVar[Optional[int]] = ContextVar(
+    "_max_agent_depth",
+    default=0,
+)
 
 def new_history() -> list:
     return [{"role": "system", "content": SYSTEM}]
 
 
 def run_agent(user_message: str, history: Optional[list] = None,
-    tool_gate: Optional[ToolGate] = None) -> tuple[str, list]:
+    tool_gate: Optional[ToolGate] = None, max_depth: int = 0) -> tuple[str, list]:
     """Odpowiada na jedną wiadomość użytkownika.
 
     Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
@@ -39,6 +43,7 @@ def run_agent(user_message: str, history: Optional[list] = None,
     messages.append({"role": "user", "content": user_message})
 
     token = _current_tool_gate.set(tool_gate)
+    max_depth_token = _max_agent_depth.set(max_depth)
     try:
         for step in range(MAX_TOOL_STEPS):
             msg = llm_client.chat(messages, tools=TOOLS)
@@ -71,3 +76,4 @@ def run_agent(user_message: str, history: Optional[list] = None,
 
     finally:
         _current_tool_gate.reset(token)
+        _max_agent_depth.reset(max_depth_token)
