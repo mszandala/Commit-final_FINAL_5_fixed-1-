@@ -1,5 +1,5 @@
 from typing import Callable, Optional
-
+from contextvars import ContextVar
 from chatbot import llm_client
 from config import MAX_TOOL_STEPS
 from tools.registry import TOOLS, run_tool
@@ -11,9 +11,6 @@ SYSTEM = (
     "Be concise."
 )
 
-# Bramka wywoływana przed każdym narzędziem: (name, args) -> None, gdy wolno je wykonać,
-# albo tekst odmowy, który model dostaje zamiast wyniku i pracuje dalej bez narzędzia.
-# Żeby zablokować całą odpowiedź, bramka rzuca ResponseBlocked.
 ToolGate = Callable[[str, dict], Optional[str]]
 
 
@@ -21,12 +18,18 @@ class ResponseBlocked(Exception):
     pass
 
 
+_current_tool_gate: ContextVar[Optional[ToolGate]] = ContextVar(
+    "_current_tool_gate",
+    default=None,
+)
+
+
 def new_history() -> list:
     return [{"role": "system", "content": SYSTEM}]
 
 
 def run_agent(user_message: str, history: Optional[list] = None,
-              tool_gate: Optional[ToolGate] = None) -> tuple[str, list]:
+    tool_gate: Optional[ToolGate] = None) -> tuple[str, list]:
     """Odpowiada na jedną wiadomość użytkownika.
 
     Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
@@ -35,26 +38,36 @@ def run_agent(user_message: str, history: Optional[list] = None,
     messages = list(history) if history else new_history()
     messages.append({"role": "user", "content": user_message})
 
-    for step in range(MAX_TOOL_STEPS):
-        msg = llm_client.chat(messages, tools=TOOLS)
+    token = _current_tool_gate.set(tool_gate)
+    try:
+        for step in range(MAX_TOOL_STEPS):
+            msg = llm_client.chat(messages, tools=TOOLS)
 
-        if not msg.tool_calls:
-            messages.append({"role": "assistant", "content": msg.content})
-            return msg.content, messages
+            if not msg.tool_calls:
+                messages.append({"role": "assistant", "content": msg.content})
+                return msg.content, messages
 
-        messages.append(msg)
+            messages.append(msg)
 
-        for tc in msg.tool_calls:
-            name = tc.function.name
-            args = dict(tc.function.arguments)
-            refusal = tool_gate(name, args) if tool_gate else None
-            result = refusal if refusal is not None else run_tool(name, args)
-            messages.append({
-                "role": "tool",
-                "content": result,
-            })
+            for tc in msg.tool_calls:
+                name = tc.function.name
+                args = dict(tc.function.arguments)
 
-    messages.append({"role": "user", "content": "Please give your final answer now."})
-    msg = llm_client.chat(messages)
-    messages.append({"role": "assistant", "content": msg.content})
-    return msg.content, messages
+                refusal = tool_gate(name, args) if tool_gate else None
+                result = refusal if refusal is not None else run_tool(name, args)
+
+                messages.append({
+                    "role": "tool",
+                    "content": result,
+                })
+
+        messages.append({
+            "role": "user",
+            "content": "Please give your final answer now.",
+        })
+        msg = llm_client.chat(messages)
+        messages.append({"role": "assistant", "content": msg.content})
+        return msg.content, messages
+
+    finally:
+        _current_tool_gate.reset(token)
