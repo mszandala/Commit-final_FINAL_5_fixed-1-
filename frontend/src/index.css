@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/* Only palette colours are available, so raw Tailwind colours can't sneak in. */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-navy: #00355f;
+  --color-blue: #7399c6;
+  --color-blue-light: #acd4f1;
+  --color-ink: #231f20;
+  --color-grey: #58575a;
+  --color-page: #f4f7fb;
+  --color-line: #dde4ec;
+  --color-red: #c57297;
+  --color-green: #97c572;
+  --color-amber: #c5ad72;
+  --color-red-text: #9c3f69;
+  --color-green-text: #4a7a22;
+  --color-amber-text: #7a5f1c;
+  --color-teal: #72c5bc;
+  --color-violet: #8472c5;
+
+  --font-sans: "Instrument Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+body {
+  @apply bg-page text-ink font-sans;
+  font-size: 15px;
+  /* The text cursor is only for inputs, which set their own. */
+  cursor: default;
+}
+
+/* Tailwind v4 dropped the pointer cursor on buttons. */
+@layer base {
+  button:not(:disabled),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+}

@@ -156,6 +156,23 @@ RESOURCE_TOOLS = {
 GLOBAL_BLOCKED_PII  = ["PASSWORD", "CREDIT-CARD-NO"]
 GLOBAL_REDACTED_PII = ["EMAIL", "PHONE-NO"]
 
+# Nazwy typów dla interfejsu: znaczniki [TYP] w odpowiedzi; REDACTED to komórka tabeli ukryta u źródła.
+PII_LABELS = {
+    "NAME":           "Name",
+    "SALARY":         "Salary",
+    "ORGANIZATION":   "Organization",
+    "LOCATION":       "Location",
+    "PROJECT":        "Project",
+    "EMAIL":          "Email",
+    "PHONE-NO":       "Phone",
+    "PASSWORD":       "Password",
+    "CREDIT-CARD-NO": "Card number",
+    "CLIENT-ID":      "Client ID",
+    "ACCOUNT-NO":     "Account number",
+    "EMPLOYEE-ID":    "Employee ID",
+    "REDACTED":       "Hidden",
+}
+
 ROLES = {
     "podstawowy użytkownik": {
         "description": "Pracownik bez specjalnych uprawnień; korzysta z ogólnej bazy wiedzy o projektach.",
@@ -215,6 +232,8 @@ _ROLE_PROFILES = {
 }
 for _name, (_id, _label, _user, _budget) in _ROLE_PROFILES.items():
     ROLES[_name].update(id=_id, label=_label, user=_user, daily_token_budget=_budget)
+# Kolejność ról w interfejsie: od najmniejszych uprawnień, administrator na końcu.
+ROLES = {_name: ROLES[_name] for _name in _ROLE_PROFILES}
 
 
 # --- Polityki danych wrażliwych -------------------------------------------------------------

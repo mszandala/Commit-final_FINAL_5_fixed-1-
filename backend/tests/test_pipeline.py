@@ -342,3 +342,12 @@ def test_policy_classifier_verdict_on_public_data_warns(llm, env, policies, monk
     result = pipeline.run_turn(pipeline.Conversation("kadry"), "Pokaż pracownika i marże")
     assert result.tool_calls[0]["allowed"]
     assert result.blocked and result.verdict["stage"] == "company_policies"
+
+
+def test_common_words_are_not_hidden_as_locations(monkeypatch):
+    text = "city, demo environment, Isle of Man, Kraków"
+    entities = [{"type": "LOCATION", "text": t, "start": text.index(t), "end": text.index(t) + len(t)}
+                for t in text.split(", ")]
+    monkeypatch.setattr(pipeline, "_detect", lambda text, threshold=None: [dict(e) for e in entities])
+    shown = pipeline.filter_output("podstawowy użytkownik", text)[0]
+    assert shown == "city, demo environment, [LOCATION], [LOCATION]"

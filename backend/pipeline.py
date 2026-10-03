@@ -162,6 +162,8 @@ class TurnResult:
     latency_ms: int = 0
     error: Optional[str] = None     # błąd wywołania modelu (tura nie dała odpowiedzi)
     cost: float = 0.0               # koszt chatbota w dolarach (zgłoszony przez dostawcę modelu)
+    verdicts: list = field(default_factory=list)          # wszystkie decyzje tury, od najważniejszej
+    masked_for_model: list = field(default_factory=list)  # typy z promptu ukryte przed chatbotem
 
 
 # Etapy tury zgłaszane przez on_progress.
@@ -245,9 +247,9 @@ class SecureToolGate:
         self.whitelist = ToolGate(conv.role)
         self.on_progress = on_progress
 
-    def _report(self, name: str) -> None:
+    def _report(self, call: dict) -> None:
         if self.on_progress:
-            self.on_progress("tool", self.calls[-1])
+            self.on_progress("tool", call)
             self.on_progress("stage", {"stage": STAGE_MODEL})
 
     @property
@@ -256,9 +258,11 @@ class SecureToolGate:
 
     def __call__(self, name: str, args: dict) -> Optional[str]:
         refusal = self.whitelist(name, args)
+        # Subagent dopisuje własne wywołania do `calls`, zanim to się skończy — trzymamy własny wpis.
+        call = self.calls[-1]
         if refusal is not None:
             audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="tool_whitelist")
-            self._report(name)
+            self._report(call)
             return refusal
 
         # Kod do uruchomienia sprawdzamy tu, żeby odrzucenie było widoczne jako decyzja warstwy
@@ -266,10 +270,10 @@ class SecureToolGate:
         if name == "run_python":
             verdict = check_code(str(args.get("code", "")))
             if verdict.is_blocked:
-                self.calls[-1].update(allowed=False, stage="code_guard", reason=verdict.reason)
+                call.update(allowed=False, stage="code_guard", reason=verdict.reason)
                 audit.record("tool_call", "security", tool=name, allowed=False, args=args,
                              stage="code_guard", reason=verdict.reason)
-                self._report(name)
+                self._report(call)
                 return f"Code rejected by security policy: {verdict.reason}"
 
         # Narzędzia działają lokalnie na prawdziwych wartościach. Wyjątek: subagent, którego
@@ -304,7 +308,7 @@ class SecureToolGate:
             self.conv.private_context = True
         audit.record("tool_call", "local" if local else "chatbot", tool=name, allowed=True, args=args,
                      scan=scan, masked=stats, result_chars=len(masked))
-        self._report(name)
+        self._report(call)
         return masked
 
     def _deny_by_policy(self, name: str, args: dict, verdict, message: str) -> str:
@@ -334,9 +338,12 @@ def _plausible(entity: dict) -> bool:
 
     GLiNER na polskim tekście oznacza zwykłe słowa ("Kobieta", "Wiek") jako osoby.
     """
+    words = entity["text"].split()
     if entity["type"] == "NAME":
-        words = entity["text"].split()
         return len(words) >= 2 and all(w[0].isupper() for w in words)
+    # Także zwykłe słowa ("city", "demo environment") jako miejsca; krótkie łączniki ("Isle of Man") zostają.
+    if entity["type"] == "LOCATION":
+        return bool(words) and words[0][0].isupper() and all(w[0].isupper() or len(w) <= 3 for w in words)
     return True
 
 
@@ -440,8 +447,14 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
                      tokens=tokens, cost=cost, security_tokens=security_tokens,
                      security_cost=security_cost, latency_ms=latency)
         audit.flush(events, conversation=conv.id, role=conv.role, turn=conv.turns)
+        # Ostrzeżenie strażnika zostaje obok decyzji innego etapu (np. redact), zamiast przez nią znikać.
+        verdicts = [verdict] if verdict else []
+        if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
+            verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": _clean(guard.reason)})
+        masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
         return TurnResult(reply, blocked, reason, guard, masked_prompt, list(entities), gate.calls,
-                          output, leaks, events, verdict, tokens, latency, error, cost)
+                          output, leaks, events, verdict, tokens, latency, error, cost,
+                          verdicts=verdicts, masked_for_model=masked)
 
     def block(stage_name, reason):
         return {"decision": "block", "stage": stage_name, "reason": reason}

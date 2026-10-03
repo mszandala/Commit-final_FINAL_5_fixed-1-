@@ -23,6 +23,7 @@ python main.py
 | GET | `/meta` | słowniki: modele, poziomy czułości, obszary dostępu, typy PII, nazwy etapów, przykłady | stałe z `mock/config.js`, `getExamples()` |
 | GET | `/roles` | role do wyboru w czacie z użytkownikiem i stanem budżetu | `USERS` z `mock/data.js` |
 | GET | `/config` | bieżąca konfiguracja | `getConfig()` |
+| GET | `/config/defaults` | konfiguracja startowa, bez stosowania (do wypełnienia formularza) | „Reset to defaults" |
 | PUT | `/config` | zmiana konfiguracji (pola opcjonalne) | zapis formularza |
 | POST | `/config/reset` | powrót do wartości startowych | „Reset to defaults" |
 | POST | `/chat` | jedna wiadomość, odpowiedź po całej turze | `sendMessage()` |
@@ -57,6 +58,8 @@ Odpowiedź (`ChatResponse`):
       "allowed": true, "stage": null, "reason": null }
   ],
   "verdict": null,
+  "verdicts": [],
+  "maskedForModel": ["CLIENT-ID"],
   "tokens": 4323,
   "cost": 0.00048,
   "latencyMs": 20086,
@@ -70,11 +73,15 @@ Odpowiedź (`ChatResponse`):
 - `stage` to klucz z `GET /meta → controls`: `prompt_guard`, `tool_whitelist`, `pii_policy`,
   `code_guard`, `company_policies`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
   warto brać z `/meta`, a nieznany klucz pokazywać wprost.
+- `verdicts` to wszystkie decyzje tury, od najważniejszej; `verdict` to jej pierwszy element. Przykład:
+  ostrzeżenie strażnika promptu i ukrycie e-maila w tej samej turze dają `["redact", "warn"]`.
+- `maskedForModel` to typy danych z promptu, które chatbot dostał jako znaczniki. Wartości wpisane
+  przez użytkownika wracają do niego w odpowiedzi, więc bez tego pola maskowanie nie byłoby widać.
 - Odrzucone wywołanie narzędzia ma `allowed: false` oraz `stage` i `reason`.
 - Argumenty narzędzi są w postaci zamaskowanej (np. `ID-b1813ca0cf` zamiast numeru klienta).
 - Ukryte dane w `text` mają postać `[TYP]`, np. `[EMAIL]`, `[PHONE-NO]`, `[SALARY]`; komórki
-  tabel ukryte u źródła mają `[REDACTED]`. Fragmenty ukryte przez regulaminy firmowe mają postać
-  `[ZASTRZEŻONE: ID-REGUŁY]`.
+  tabel ukryte u źródła mają `[REDACTED]`. Nazwy dla ludzi: `GET /meta → piiLabels`. Fragmenty
+  ukryte przez regulaminy firmowe mają postać `[ZASTRZEŻONE: ID-REGUŁY]`.
 - `reason` jest po polsku.
 
 ### Strumień (`POST /chat/stream`)
@@ -85,11 +92,12 @@ i `response.body.getReader()`, a nie przez `EventSource`.
 | Zdarzenie | Dane | Kiedy |
 |---|---|---|
 | `stage` | `{ "stage": "checking_request" \| "waiting_for_model" \| "checking_reply" }` | zmiana etapu |
-| `tool` | obiekt jak w `tools` | po każdym wywołaniu narzędzia |
+| `tool` | obiekt jak w `tools` (także wywołania subagenta) | po każdym wywołaniu narzędzia |
 | `result` | pełny `ChatResponse` | koniec udanej tury |
 | `error` | `{ "status": 502, "detail": "..." }` | błąd; strumień się kończy |
 
-Nazwy etapów dla ludzi są w `GET /meta → stages`.
+Nazwy etapów dla ludzi są w `GET /meta → stages`. Nieznana rola lub rozmowa daje zwykłe 404/409
+przed otwarciem strumienia; zdarzenie `error` dotyczy tylko błędów w trakcie tury.
 
 ### Błędy
 
@@ -98,7 +106,7 @@ Nazwy etapów dla ludzi są w `GET /meta → stages`.
 | 404 | nieznana rola, rozmowa albo zdarzenie |
 | 409 | `conversationId` należy do innej roli |
 | 422 | błędne dane (pusta wiadomość, nieznana wartość w konfiguracji) |
-| 502 | model nie odpowiedział; nadaje się do przycisku „Retry" |
+| 502 | model nie odpowiedział; nadaje się do przycisku „Retry". Tura trafia do logu jako `Error`, a zużyte tokeny do budżetu |
 
 Wyczerpany budżet tokenów nie jest błędem: zwraca 200 z `text: null` i werdyktem `budget`.
 
@@ -163,7 +171,8 @@ też w każdej odpowiedzi czatu.
 
 ## Log
 
-`GET /events?afterId=0&limit=200&decision=Blocked` — wiersze od najstarszego:
+`GET /events?limit=200&decision=Blocked` — ostatnie `limit` wierszy, od najstarszego;
+z `afterId` — kolejne wiersze po nim:
 
 ```json
 {
@@ -177,12 +186,15 @@ też w każdej odpowiedzi czatu.
   "stage": "tool_whitelist",
   "control": "Tool permissions",
   "reason": "read_employee_records: Narzędzie niedostępne dla roli „podstawowy użytkownik”",
+  "maskedForModel": [],
+  "model": "google/gemma-4-26b-a4b-it:free",
   "tokens": 3655,
   "latencyMs": 4152
 }
 ```
 
-- Jedna tura to jeden wiersz. `decision`: `Allowed`, `Redacted` albo `Blocked`.
+- Jedna tura to jeden wiersz. `decision`: `Allowed`, `Redacted`, `Blocked` albo `Error` (model nie
+  odpowiedział). Ostrzeżenie strażnika promptu przy innej decyzji jest dopisane do `reason`.
 - Tura z odrzuconym narzędziem jest `Blocked`, nawet jeśli użytkownik dostał odpowiedź
   (tak jak w mockach).
 - Odświeżanie: odpytywanie `GET /events?afterId=<ostatnie id>` co kilka sekund; `eventId`
