@@ -22,8 +22,10 @@ backend/
 │   ├── prompt_guard.py         # 1. LLM: czy prompt zgodny z rolą → pass/block
 │   ├── tool_whitelist.py       # 2a. deterministyczne sprawdzenie: narzędzie w whiteliście roli?
 │   ├── tool_violation_judge.py # 2b. LLM: błąd modelu czy intencja użytkownika → retry/block
-│   ├── pii_detector.py         # 3a. wykrywanie PII (z obecnego PII_detector.py)
-│   ├── pii_access_judge.py     # 3b. LLM: czy rola może zobaczyć wykryte dane → pass/block
+│   ├── regex_detector.py       # 3a. szybka detekcja regułowa (<0.1ms): hasła, e-maile, telefony
+│   ├── gliner_detector.py      # 3b. semantyczna detekcja zero-shot NER: organizacje, kwoty, projekty
+│   ├── pii_detector.py         # 3c. fasada łącząca reguły i model + deduplikacja
+│   ├── pii_access_judge.py     # 3d. LLM: czy rola może zobaczyć wykryte dane → pass/block
 │   ├── verdicts.py             # wspólne typy wyników: Verdict(decision, reason, stage)
 │   └── prompts/
 │       ├── prompt_guard.txt
@@ -116,9 +118,9 @@ Gotowe: `config.py`, `tools/_files.py`, `tools/registry.py`, `chatbot/llm_client
 
 ## Do ustalenia
 
-- Model PII (`AI-Enthusiast11/pii-entity-extractor`) zna tylko 7 kategorii: NAME, ADDRESS, PHONE-NO,
-  SSN, CREDIT-CARD-NO, BANK-ACCOUNT-NO, BANK-ROUTING-NO. Nie wykrywa e-maili, haseł ani wynagrodzeń,
-  a w teście pominął „John Smith". Do decyzji: inny model albo uzupełnienie regułami.
+- Model PII: wdrożono hybrydowy model `urchade/gliner_small-v2.1` z regułami regex dla haseł,
+  e-maili i numerów telefonów. Wykrywa encje: `NAME`, `ORGANIZATION`, `LOCATION`, `SALARY`, `PASSWORD`,
+  `PROJECT`, `PHONE-NO`, `EMAIL`, `CREDIT-CARD-NO`. Skanuje długie teksty z podziałem na okna (sliding-window).
 
 - Faktyczne dane: jakie pliki csv/txt, w jakich podfolderach `data/`.
 - Wynikający z tego podział `tools/` i ostateczne whitelisty ról.

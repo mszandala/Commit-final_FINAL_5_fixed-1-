@@ -1,7 +1,28 @@
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
-MODEL = "gemma4:12b"
-PII_MODEL = "AI-Enthusiast11/pii-entity-extractor"
+# Wczytanie zmiennych środowiskowych (.env z folderu backend lub nadrzędnego)
+load_dotenv()
+load_dotenv(Path(__file__).parent / ".env")
+
+# Provider LLM: "openrouter" (domyślny) lub "ollama"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
+
+# Konfiguracja OpenRouter
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it:free")
+
+# Konfiguracja Ollama
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
+
+# Aktywny model przypisany do providera
+MODEL = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else OLLAMA_MODEL
+
+# Model wykrywania PII / danych poufnych (GLiNER zero-shot NER)
+PII_MODEL = os.getenv("PII_MODEL", "urchade/gliner_small-v2.1")
+PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
 BASE_DIR       = Path(__file__).parent / "data"
 MAX_HISTORY    = 12
