@@ -1,7 +1,7 @@
 import ast
 import builtins
 
-from security.verdicts import Verdict
+from security.common.verdicts import Verdict
 
 # Moduły czysto obliczeniowe — bez dostępu do plików, sieci i procesów.
 ALLOWED_MODULES = {

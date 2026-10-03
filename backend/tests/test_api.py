@@ -10,7 +10,7 @@ from api.app import app
 from audit import logger as audit_logger
 from chatbot import llm_client
 from config import ROLES, SETTINGS
-from security.regex_detector import detect_regex_pii
+from security.pii.regex_detector import detect_regex_pii
 from tools import domain_helpers
 
 client = TestClient(app)

@@ -1,5 +1,5 @@
 from config import GLOBAL_BLOCKED_PII, GLOBAL_REDACTED_PII, ROLES
-from security.pii_policy import check_pii, redact
+from security.pii.pii_policy import check_pii, redact
 
 
 def entity(text, full, type_):
@@ -50,3 +50,9 @@ def test_redact_multiple_entities():
     text = "a@b.pl i +48 600 700 800"
     entities = [entity("a@b.pl", text, "EMAIL"), entity("+48 600 700 800", text, "PHONE-NO")]
     assert redact(text, entities) == "[EMAIL] i [PHONE-NO]"
+
+
+def test_redact_handles_multiple_entities_in_one_pass():
+    text = "Mail: a@b.pl, tel. +48 600 700 800."
+    entities = [entity("+48 600 700 800", text, "PHONE-NO"), entity("a@b.pl", text, "EMAIL")]
+    assert redact(text, entities) == "Mail: [EMAIL], tel. [PHONE-NO]."

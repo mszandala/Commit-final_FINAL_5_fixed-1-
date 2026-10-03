@@ -26,13 +26,14 @@ from config import (
 )
 from security import masking
 from security.code_guard import check_code
+from security.common.roles import normalize_role
+from security.common.verdicts import Verdict
 from security.masking import Vault, chatbot_action, label_for, role_policy
-from security.pii_detector import detect_pii
+from security.pii.pii_detector import detect_pii
+from security.pii.regex_detector import detect_regex_pii
 from security.pii_judge import judge_entities
-from security.prompt_guard import check_prompt, normalize_role
-from security.regex_detector import detect_regex_pii
+from security.prompt_guard import check_prompt
 from security.tool_whitelist import ToolGate
-from security.verdicts import Verdict
 from tools.registry import run_tool
 
 MASKING_NOTE = (
