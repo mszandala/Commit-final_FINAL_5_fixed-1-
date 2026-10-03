@@ -88,6 +88,7 @@ CONTROLS = {
     "tool_whitelist": "Tool permissions",
     "pii_policy":     "PII policy",
     "code_guard":     "Code guard",
+    "company_policies": "Company policy",
     "budget":         "Token budget",
 }
 
@@ -99,7 +100,23 @@ COMPANY_DOCUMENTS_DIR = BASE_DIR / "company_documents"  # regulaminy, NDA, polit
 COMPANY_FIXTURES_DIR  = BASE_DIR / "company_fixtures"   # poufne materiały do fingerprintingu
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
+# Limit wydatków na rolę w dolarach (łącznie, bez dziennego zerowania) i baza, w której są zapisywane.
 MAX_SPENDING = 0.5
+SPENDING_DB = Path(__file__).parent / "spending.db"
+
+# Moduł regulaminów firmowych (security/company_policies) w przebiegu tury.
+COMPANY_POLICIES_ENABLED = os.getenv("COMPANY_POLICIES_ENABLED", "true").lower() == "true"
+# Klasyfikator semantyczny modułu: "security" = strefa bezpieczeństwa (SECURITY_PROVIDER/SECURITY_MODEL),
+# "policy" = provider i model z nagłówka rules.txt (docelowo lokalna Ollama).
+COMPANY_POLICIES_CLASSIFIER = os.getenv("COMPANY_POLICIES_CLASSIFIER", "security")
+# Samo słowo kluczowe w wyniku narzędzia albo w odpowiedzi to słaby dowód (np. „marża” w omówieniu
+# wyników spółki), więc domyślnie daje ostrzeżenie zamiast blokady. W prompcie blokuje jak dotąd;
+# znaczniki, wzorce, odciski plików i klasyfikator blokują wszędzie. true = blokuj także tutaj.
+COMPANY_POLICIES_STRICT_KEYWORDS = os.getenv("COMPANY_POLICIES_STRICT_KEYWORDS", "false").lower() == "true"
+
+# Ogólne reguły postępowania dla chatbota (decyzje kadrowe, dyskryminacja itp.). Warstwa nie zmienia
+# promptu systemowego chronionego chatbota — reguły dołącza do pierwszej wiadomości rozmowy.
+CONDUCT_RULES_FILE = Path(__file__).parent / "security" / "rules.txt"
 # Narzędzia pogrupowane po domenach danych (podfoldery data/).
 _GENERIC_TOOLS = ["list_files", "read_file"]
 _PROJECTS  = ["list_projects", "read_project"]

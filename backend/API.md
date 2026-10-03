@@ -58,8 +58,9 @@ Odpowiedź (`ChatResponse`):
   ],
   "verdict": null,
   "tokens": 4323,
+  "cost": 0.00048,
   "latencyMs": 20086,
-  "budget": { "limit": 50000, "used": 4323 }
+  "budget": { "limit": 50000, "used": 4323, "spendingLimit": 0.5, "spent": 0.00048 }
 }
 ```
 
@@ -67,12 +68,13 @@ Odpowiedź (`ChatResponse`):
 - `verdict` to najważniejsza decyzja tury albo `null`:
   `{ "decision": "warn" | "redact" | "block", "stage": "...", "reason": "..." }`.
 - `stage` to klucz z `GET /meta → controls`: `prompt_guard`, `tool_whitelist`, `pii_policy`,
-  `code_guard`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
+  `code_guard`, `company_policies`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
   warto brać z `/meta`, a nieznany klucz pokazywać wprost.
 - Odrzucone wywołanie narzędzia ma `allowed: false` oraz `stage` i `reason`.
 - Argumenty narzędzi są w postaci zamaskowanej (np. `ID-b1813ca0cf` zamiast numeru klienta).
 - Ukryte dane w `text` mają postać `[TYP]`, np. `[EMAIL]`, `[PHONE-NO]`, `[SALARY]`; komórki
-  tabel ukryte u źródła mają `[REDACTED]`.
+  tabel ukryte u źródła mają `[REDACTED]`. Fragmenty ukryte przez regulaminy firmowe mają postać
+  `[ZASTRZEŻONE: ID-REGUŁY]`.
 - `reason` jest po polsku.
 
 ### Strumień (`POST /chat/stream`)
@@ -142,11 +144,22 @@ Różnice względem `mock/config.js`:
 `GET /roles` zwraca dla każdej roli to, co `roles[]` w konfiguracji, oraz:
 
 ```json
-{ "description": "Dział kadr; ...", "user": "Anna Wiśniewska", "budget": { "limit": 50000, "used": 0 } }
+{ "description": "Dział kadr; ...", "user": "Anna Wiśniewska",
+  "budget": { "limit": 50000, "used": 0, "spendingLimit": 0.5, "spent": 0.0 } }
 ```
 
-Budżet jest dzienny i liczony z faktycznego zużycia zgłaszanego przez dostawcę modelu (wszystkie
-wywołania tury, także strefy bezpieczeństwa). Aktualny stan wraca też w każdej odpowiedzi czatu.
+Rola ma dwa limity i blokuje ten, który wyczerpie się pierwszy (werdykt `budget`):
+
+- `limit` / `used` — dzienny budżet tokenów, liczony z faktycznego zużycia zgłaszanego przez dostawcę
+  modelu,
+- `spendingLimit` / `spent` — łączny limit wydatków w dolarach (`MAX_SPENDING`), bez dziennego zerowania.
+
+Do obu limitów liczą się tylko wywołania chatbota. Strażnicy i sędziowie (strefa bezpieczeństwa)
+docelowo działają lokalnie, więc ich zużycie nie obciąża użytkownika; jest widoczne w śladzie audytu
+tury (`securityTokens`, `securityCost` w zdarzeniu `turn`).
+
+Zużycie jest zapisywane w `backend/spending.db`, więc przetrwa restart serwera. Aktualny stan wraca
+też w każdej odpowiedzi czatu.
 
 ## Log
 
@@ -189,6 +202,6 @@ zdarzenia audytu tury z polem `zone` (`security`, `chatbot`, `local`), bez surow
 ## Czego w v1 nie ma
 
 - **Załączniki.** Composer pozwala dodać pliki, ale backend nie ma jeszcze ich obsługi.
-- **Trwałość.** Log i konfiguracja znikają po restarcie serwera (szczegółowy log audytu zostaje
-  w `audit/events.jsonl`).
+- **Trwałość.** Log i konfiguracja znikają po restarcie serwera; zostają budżety (`spending.db`)
+  i szczegółowy log audytu (`audit/events.jsonl`).
 - **Uwierzytelnianie.** Każdy klient może wybrać dowolną rolę i zmienić konfigurację.

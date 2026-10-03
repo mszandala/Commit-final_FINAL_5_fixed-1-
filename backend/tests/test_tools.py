@@ -81,9 +81,9 @@ def test_unknown_role_has_no_tools():
     assert is_allowed("administrator", "read_stock_prices")
 
 
-def test_system_prompt_includes_user_role():
-    from pipeline import _system_prompt
-    prompt = _system_prompt("kadry")
+def test_notice_includes_user_role():
+    from pipeline import _notice
+    prompt = _notice("kadry")
     assert "User's current role is: 'kadry'" in prompt
     assert "read_employee_records" in prompt
     assert "read_client_records" not in prompt

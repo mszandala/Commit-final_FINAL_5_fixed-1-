@@ -116,6 +116,8 @@ def _chat_openrouter(messages: list, tools: Optional[list] = None, model: Option
     }
     if formatted_tools:
         params["tools"] = formatted_tools
+    # Prosimy OpenRouter o koszt wywołania w dolarach (pole usage.cost) — z tego liczy się limit wydatków.
+    params["extra_body"] = {"usage": {"include": True}}
 
     response = client.chat.completions.create(**params)
     choice = response.choices[0]
@@ -149,7 +151,7 @@ def _chat_openrouter(messages: list, tools: Optional[list] = None, model: Option
         role="assistant",
         content=raw_msg.content or "",
         tool_calls=tool_calls,
-    ), int(getattr(usage, "total_tokens", 0) or 0)
+    ), int(getattr(usage, "total_tokens", 0) or 0), float(getattr(usage, "cost", 0) or 0)
 
 
 def _chat_ollama(messages: list, tools: Optional[list] = None, model: Optional[str] = None):
@@ -163,7 +165,7 @@ def _chat_ollama(messages: list, tools: Optional[list] = None, model: Optional[s
 
     response = ollama.chat(**params)
     tokens = (getattr(response, "prompt_eval_count", 0) or 0) + (getattr(response, "eval_count", 0) or 0)
-    return response.message, int(tokens)
+    return response.message, int(tokens), 0.0
 
 
 def chat(
@@ -201,7 +203,7 @@ def chat(
             f"Nieznany provider: {chosen_provider}. Dostępne opcje to 'openrouter' i 'ollama'."
         )
 
-    message, tokens = call(messages, tools=tools, model=used_model)
+    message, tokens, cost = call(messages, tools=tools, model=used_model)
     audit.record("llm_call", zone, purpose=purpose, provider=chosen_provider, model=used_model,
-                 messages=len(messages), tokens=tokens)
+                 messages=len(messages), tokens=tokens, cost=cost)
     return message

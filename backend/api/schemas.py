@@ -30,8 +30,10 @@ class ToolCall(ApiModel):
 
 
 class Budget(ApiModel):
-    limit: int
-    used: int
+    limit: int = Field(description="Dzienny budżet tokenów roli")
+    used: int = Field(description="Tokeny zużyte dzisiaj")
+    spending_limit: float = Field(description="Limit wydatków roli w dolarach (łączny)")
+    spent: float = Field(description="Dotychczasowe wydatki roli w dolarach")
 
 
 class ChatRequest(ApiModel):
@@ -47,6 +49,7 @@ class ChatResponse(ApiModel):
     tools: list[ToolCall]
     verdict: Optional[Verdict] = Field(description="Najważniejsza decyzja tury; null, gdy nic nie zadziałało")
     tokens: int
+    cost: float = Field(description="Koszt tury w dolarach zgłoszony przez dostawcę modelu")
     latency_ms: int
     budget: Budget
 

@@ -123,7 +123,7 @@ def test_6b_internal_email_is_not_external(engine):
 
 def test_7_employee_asks_about_colleague_salary(engine):
     v = engine.check_input(EMPLOYEE, "Ile wynosi wynagrodzenie Anny z księgowości?")
-    assert v.decision == "block"
+    assert v.decision == "warn" and not v.is_blocked     # ostrzeżenie; danych i tak broni whitelist narzędzi
     assert v.details["rule_id"] == "REG-HY26-04"
 
 

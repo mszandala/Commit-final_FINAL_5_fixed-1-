@@ -30,6 +30,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_logger, "AUDIT_LOG", tmp_path / "events.jsonl")
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", True)
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
     pipeline._detect_cached.cache_clear()
     (tmp_path / "clients_data").mkdir()
     (tmp_path / "clients_data" / "Bank Customer Churn Prediction.csv").write_text(
@@ -235,3 +236,109 @@ def test_account_number_is_pseudonymized(llm, env):
     result = pipeline.run_turn(pipeline.Conversation("bankier"), "Pokaż klienta")
     assert result.reply.split("\n")[1] == f"{CLIENT},9999{CLIENT},Spain"
     assert CLIENT not in _sent_to_chatbot(llm)
+
+
+# --- regulaminy firmowe (security/company_policies) w przebiegu tury -------------------------
+
+@pytest.fixture
+def policies(monkeypatch, tmp_path):
+    """Włącza moduł regulaminów z prawdziwymi regułami; klasyfikator semantyczny niczego nie rozpoznaje."""
+    from security.company_policies import CompanyPolicyEngine
+
+    engine = CompanyPolicyEngine(
+        classifier=lambda text, categories, policy: {"category": "none", "confidence": 0.0, "reason": ""},
+        audit_path=tmp_path / "policy_audit.jsonl")
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", True)
+    monkeypatch.setattr(pipeline, "_policy_engine", engine)
+    return engine
+
+
+def test_policy_blocks_prompt_before_the_model(llm, env, policies):
+    prompt = "Jakie rabaty mamy w cenniku dla klientów?"
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), prompt)
+    assert result.blocked and result.verdict["stage"] == "company_policies"
+    assert "Oświadczenia o poufności" in result.verdict["reason"] and llm.chatbot == []
+
+    llm.queue = [_reply("Rabaty są w cenniku.")]
+    result = pipeline.run_turn(pipeline.Conversation("bankier"), prompt)     # bankier ma dostęp
+    assert not result.blocked and result.reply == "Rabaty są w cenniku."
+
+
+def test_policy_keyword_in_reply_warns_instead_of_blocking(llm, env, policies, monkeypatch):
+    # samo słowo kluczowe w odpowiedzi (tu: „rabat” w omówieniu wyników spółki) tylko ostrzega
+    llm.queue = [_reply("Apple ograniczyło rabaty dla operatorów.")]
+    result = pipeline.run_turn(pipeline.Conversation("Portfolio Manager"), "Jak wypadł kwartał Apple?")
+    assert not result.blocked and result.reply == "Apple ograniczyło rabaty dla operatorów."
+    assert result.verdict == {"decision": "warn", "stage": "company_policies", "reason": result.verdict["reason"]}
+    event = [e for e in result.events if e["type"] == "company_policy"][-1]
+    assert (event["point"], event["decision"], event["softened"]) == ("output", "warn", True)
+
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_STRICT_KEYWORDS", True)
+    llm.queue = [_reply("Apple ograniczyło rabaty dla operatorów.")]
+    result = pipeline.run_turn(pipeline.Conversation("Portfolio Manager"), "Jak wypadł kwartał Apple?")
+    assert result.blocked and result.verdict["stage"] == "company_policies"
+
+
+def test_security_notice_goes_in_first_message_not_system_prompt(llm, env):
+    from chatbot import agent
+    conv = pipeline.Conversation("kadry")
+    llm.queue = [_reply("ok"), _reply("ok")]
+    pipeline.run_turn(conv, "Pierwsze pytanie")
+    pipeline.run_turn(conv, "Drugie pytanie")
+
+    first_call, second_call = llm.chatbot
+    assert first_call[0] == {"role": "system", "content": agent.SYSTEM}       # prompt systemowy bez zmian
+    first_user = first_call[1]["content"]
+    assert first_user.startswith("[Security layer notice") and first_user.endswith("Pierwsze pytanie")
+    assert "User's current role is: 'kadry'" in first_user and "read_employee_records" in first_user
+    assert "placeholders" in first_user and "Never generate a final decision" in first_user
+    assert second_call[-1]["content"] == "Drugie pytanie"                    # informacja idzie tylko raz
+
+
+def test_policy_withholds_tool_result(llm, env, policies):
+    (env / "projects" / "alpha_README.md").write_text("ŚCIŚLE POUFNE\nPlan przejęcia spółki.", encoding="utf-8")
+    llm.queue = [_reply(tool_calls=[_tool_call("read_project", name="alpha")]), _reply("Nie mogę tego pokazać.")]
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Co jest w projekcie alpha?")
+    call = result.tool_calls[0]
+    assert call["allowed"] is False and call["stage"] == "company_policies"
+    assert "Plan przejęcia" not in _sent_to_chatbot(llm)
+    assert "withheld by company policy" in llm.chatbot[-1][-1]["content"]
+
+    llm.queue = [_reply(tool_calls=[_tool_call("read_project", name="alpha")]), _reply("ok")]
+    result = pipeline.run_turn(pipeline.Conversation("IT"), "Co jest w projekcie alpha?")      # IT ma dostęp
+    assert result.tool_calls[0]["allowed"] is True
+
+
+def test_policy_redacts_reply(llm, env, policies):
+    llm.queue = [_reply("Umowa ma numer HY26-UM-1234.")]
+    result = pipeline.run_turn(pipeline.Conversation("prawnik"), "Jaki numer ma umowa?")
+    assert result.reply == "Umowa ma numer [ZASTRZEŻONE: NDA-HY26-03]."
+    assert result.verdict["decision"] == "redact" and result.verdict["stage"] == "company_policies"
+    points = [(e["point"], e["decision"]) for e in result.events if e["type"] == "company_policy"]
+    assert points == [("input", "pass"), ("output", "redact")]
+
+
+def test_policy_classifier_runs_in_security_zone(llm, env):
+    llm.judge = '{"category": "none", "confidence": 0.1, "reason": "brak"}'
+    result = pipeline._security_zone_classifier("tekst", {"hr_data": "dane kadrowe"}, None)
+    assert result["category"] == "none" and len(llm.security) == 1
+
+
+def test_policy_classifier_verdict_on_public_data_warns(llm, env, policies, monkeypatch):
+    """Klasyfikator ocenia temat, nie pochodzenie: bez danych niepublicznych w rozmowie jego blokada to ostrzeżenie."""
+    policies.classifier = lambda text, categories, policy: (
+        {"category": "trade_secret", "confidence": 0.95, "reason": "marże"} if "Marża" in text
+        else {"category": "none", "confidence": 0.0, "reason": ""})
+    llm.queue = [_reply(tool_calls=[_tool_call("read_project", name="alpha")]), _reply("Marża brutto Apple wzrosła.")]
+    result = pipeline.run_turn(pipeline.Conversation("prawnik"), "Jak wypadł kwartał Apple?")
+    assert not result.blocked and result.reply == "Marża brutto Apple wzrosła."
+    assert result.verdict["decision"] == "warn" and result.verdict["stage"] == "company_policies"
+
+    # gdy do rozmowy trafił wynik narzędzia niepublicznego, blokada klasyfikatora zostaje w mocy
+    (env / "employee_data").mkdir()
+    (env / "employee_data" / "WA_Fn-UseC_-HR-Employee-Attrition.csv").write_text(
+        "Age,Department" + chr(10) + "41,Sales" + chr(10), encoding="utf-8")
+    llm.queue = [_reply(tool_calls=[_tool_call("read_employee_records", limit=1)]), _reply("Marża brutto Apple wzrosła.")]
+    result = pipeline.run_turn(pipeline.Conversation("kadry"), "Pokaż pracownika i marże")
+    assert result.tool_calls[0]["allowed"]
+    assert result.blocked and result.verdict["stage"] == "company_policies"

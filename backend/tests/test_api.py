@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+import config
 import pipeline
 from api import state
 from api.app import app
@@ -32,6 +33,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_logger, "AUDIT_LOG", tmp_path / "events.jsonl")
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", False)
+    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
+    monkeypatch.setattr(config, "SPENDING_DB", tmp_path / "spending.db")
     pipeline._detect_cached.cache_clear()
     (tmp_path / "projects").mkdir()
     (tmp_path / "projects" / "alpha_README.md").write_text("Projekt alpha", encoding="utf-8")
@@ -47,7 +50,7 @@ def llm(monkeypatch):
     queue = []
 
     def chat(messages, tools=None, provider=None, model=None, zone="chatbot", purpose="chat"):
-        audit_logger.record("llm_call", zone, purpose=purpose, tokens=100)
+        audit_logger.record("llm_call", zone, purpose=purpose, tokens=100, cost=0.01)
         reply = queue.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -70,12 +73,13 @@ def test_meta_and_roles():
                                                      "earnings", "code", "subagents"]
     assert meta["piiTags"] == ["NAME", "SALARY", "ORGANIZATION", "LOCATION", "PROJECT"]
     assert meta["redactedPii"] == ["EMAIL", "PHONE-NO"] and meta["blockedPii"] == ["PASSWORD", "CREDIT-CARD-NO"]
-    assert set(meta["controls"]) == {"prompt_guard", "tool_whitelist", "pii_policy", "code_guard", "budget"}
+    assert set(meta["controls"]) == {"prompt_guard", "tool_whitelist", "pii_policy", "code_guard",
+                                     "company_policies", "budget"}
 
     roles = {r["id"]: r for r in client.get(f"{API}/roles").json()}
     assert set(roles) == {"basic_user", "hr", "banker", "analyst", "lawyer", "portfolio_manager", "it", "admin"}
     assert roles["hr"]["access"] == ["projects", "hr"] and roles["hr"]["user"] == "Anna Wiśniewska"
-    assert roles["basic_user"]["budget"] == {"limit": 20000, "used": 0}
+    assert roles["basic_user"]["budget"] == {"limit": 20000, "used": 0, "spendingLimit": 0.5, "spent": 0.0}
     assert roles["admin"]["access"] == [a["id"] for a in meta["dataAccess"]]
 
 
@@ -85,7 +89,8 @@ def test_chat_reply_tools_tokens_and_event(llm):
     assert body["text"] == "To projekt alpha." and body["verdict"] is None
     assert body["tools"] == [{"tool": "read_project", "args": {"name": "alpha"}, "allowed": True,
                               "stage": None, "reason": None}]
-    assert body["tokens"] == 200 and body["budget"] == {"limit": 20000, "used": 200}
+    assert body["tokens"] == 200 and body["cost"] == 0.02
+    assert body["budget"] == {"limit": 20000, "used": 200, "spendingLimit": 0.5, "spent": 0.02}
 
     events = client.get(f"{API}/events").json()
     assert len(events) == 1 and events[0]["id"] == body["eventId"]
@@ -143,7 +148,7 @@ def test_guard_mode_warn_then_block(llm):
 def test_budget_blocks_when_exhausted(llm, monkeypatch):
     monkeypatch.setitem(ROLES["podstawowy użytkownik"], "daily_token_budget", 150)
     llm += [_reply("ok")]
-    assert _chat("basic_user", "Pierwsze pytanie").json()["budget"] == {"limit": 150, "used": 100}
+    assert _chat("basic_user", "Pierwsze pytanie").json()["budget"]["used"] == 100
     llm += [_reply("ok")]
     assert _chat("basic_user", "Drugie pytanie").json()["budget"]["used"] == 200
     body = _chat("basic_user", "Trzecie pytanie").json()
@@ -234,3 +239,32 @@ def test_stats(llm):
     stats = client.get(f"{API}/stats").json()
     assert stats["total"] == 2 and stats["byDecision"] == {"Allowed": 1, "Redacted": 1}
     assert stats["byControl"] == {"PII policy": 1} and stats["tokens"] == 200
+
+
+def test_spending_limit_blocks_and_survives_restart(llm, monkeypatch):
+    from security import budget as budget_module
+    monkeypatch.setattr(budget_module, "MAX_SPENDING", 0.015)
+    llm += [_reply("ok"), _reply("ok")]
+    assert _chat("lawyer", "Pierwsze pytanie").json()["budget"]["spent"] == 0.01
+    assert _chat("lawyer", "Drugie pytanie").json()["budget"]["spent"] == 0.02
+    body = _chat("lawyer", "Trzecie pytanie").json()
+    assert body["text"] is None and body["verdict"]["stage"] == "budget" and "limit wydatków" in body["verdict"]["reason"]
+
+    # zużycie jest w bazie, nie w pamięci: nowy obiekt budżetu widzi to samo
+    fresh = budget_module.Budget()
+    assert round(fresh.spent("prawnik"), 2) == 0.02 and fresh.tokens_used("prawnik") == 200
+    # limit dotyczy roli: inna rola pracuje dalej
+    llm += [_reply("ok")]
+    assert _chat("banker", "Cześć").json()["text"] == "ok"
+
+
+def test_security_zone_calls_do_not_count_against_budget(llm, monkeypatch):
+    monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", True)
+    monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: (
+        [{"type": "NAME", "text": "Tim Cook", "start": 9, "end": 17}] if text.startswith("Co mówił") else []))
+    llm += [_reply('{"1": "send"}'), _reply("Mówił o usługach.")]       # sędzia (strefa bezpieczeństwa), potem chatbot
+    body = _chat("lawyer", "Co mówił Tim Cook?").json()
+    assert body["text"] == "Mówił o usługach."
+    assert body["tokens"] == 100 and body["budget"]["used"] == 100 and body["budget"]["spent"] == 0.01
+    turn = client.get(f"{API}/events/{body['eventId']}").json()["trail"][-1]
+    assert turn["security_tokens"] == 100 and turn["security_cost"] == 0.01

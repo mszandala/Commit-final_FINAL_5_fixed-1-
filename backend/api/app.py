@@ -20,6 +20,7 @@ from config import (
     DATA_ACCESS,
     GLOBAL_BLOCKED_PII,
     GLOBAL_REDACTED_PII,
+    MAX_SPENDING,
     MODEL_PRESETS,
     PII_SENSITIVITY_LEVELS,
     ROLES,
@@ -53,7 +54,8 @@ def _role_name(role_id: str) -> str:
 
 
 def _budget(name: str) -> schemas.Budget:
-    return schemas.Budget(limit=state.budget.limit(name), used=state.budget.used(name))
+    return schemas.Budget(limit=state.budget.token_limit(name), used=state.budget.tokens_used(name),
+                          spending_limit=MAX_SPENDING, spent=round(state.budget.spent(name), 6))
 
 
 def _role_config(name: str) -> dict:
@@ -90,11 +92,11 @@ def _run(request: schemas.ChatRequest, on_progress=None) -> schemas.ChatResponse
     if over_budget:
         event = state.add_event(name, conv.id, over_budget)
         return schemas.ChatResponse(conversation_id=conv.id, event_id=event["id"], text=None, tools=[],
-                                    verdict=over_budget, tokens=0, latency_ms=0, budget=_budget(name))
+                                    verdict=over_budget, tokens=0, cost=0, latency_ms=0, budget=_budget(name))
 
     with session.lock:
         result = pipeline.run_turn(conv, request.message, on_progress=on_progress)
-    state.budget.add(name, result.tokens)
+    state.budget.add(name, result.tokens, result.cost, SETTINGS.model)
     if result.error:
         raise HTTPException(502, f"Błąd wywołania modelu: {result.error}")
 
@@ -106,6 +108,7 @@ def _run(request: schemas.ChatRequest, on_progress=None) -> schemas.ChatResponse
         tools=result.tool_calls,
         verdict=result.verdict,
         tokens=result.tokens,
+        cost=round(result.cost, 6),
         latency_ms=result.latency_ms,
         budget=_budget(name),
     )

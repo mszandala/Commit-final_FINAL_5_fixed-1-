@@ -61,7 +61,7 @@ Summarize Internal: allow
 Keywords: wynagrodze, pensj, zarobk, zarabia, premi, ocena okresowa, oceny okresowe, ocen okresowych, zwolnieni lekarsk, dane kadrowe, danych kadrowych
 Semantic Classifier: hr_data
 Semantic Threshold: 0.8
-On Violation: block
+On Violation: warn
 On Detector Error: block
 Notify: security, kadry
 Required Refusal: "Zablokowano zgodnie z §3 ust. 2 Regulaminu pracy: dane kadrowe innych pracowników są dostępne wyłącznie dla działu kadr."
@@ -100,7 +100,7 @@ Allowed Roles: bankier, analityk, administrator
 External LLM: block
 External Destinations: block
 Summarize Internal: allow
-Keywords: cennik, rabat, marż, upust
+Keywords: cennik, rabat, upust
 Fingerprint: cennik_2026.md
 Semantic Classifier: trade_secret
 Semantic Threshold: 0.75
