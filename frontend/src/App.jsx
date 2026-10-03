@@ -8,7 +8,6 @@ import { refreshEvents } from './events'
 import { MetaContext } from './meta'
 import Button from './ui/Button'
 import Dialog from './ui/Dialog'
-import Notice from './ui/Notice'
 
 // The form edits this shape. The API never returns the key, so `apiKey` holds only a new one.
 const toForm = (c) => ({
@@ -102,11 +101,15 @@ export default function App() {
     return (
       <main className="grid h-screen place-items-center bg-page">
         {loadFailed && (
-          <Notice icon={CloudOff} title="Cannot reach the server">
-            <Button size="sm" icon={RotateCw} onClick={load} className="mt-2">
+          <div className="flex flex-col items-center gap-3 text-sm">
+            <p className="flex items-center gap-2 text-grey">
+              <CloudOff size={16} />
+              Cannot reach the server
+            </p>
+            <Button size="sm" icon={RotateCw} onClick={load}>
               Retry
             </Button>
-          </Notice>
+          </div>
         )}
       </main>
     )
