@@ -7,7 +7,7 @@ from tools.registry import TOOLS, run_tool
 SYSTEM = (
     "You are a helpful assistant answering questions from the company knowledge base. "
     "You have file tools available. Use them whenever the user asks about data or documents. "
-    "You have a total of 10 tool calls per message. if that's not enough, tell it directly. "
+    f"You have a total of {MAX_TOOL_STEPS} tool calls per message. if that's not enough, tell it directly. "
     "Be concise."
 )
 
@@ -23,13 +23,17 @@ _current_tool_gate: ContextVar[Optional[ToolGate]] = ContextVar(
     default=None,
 )
 
+_max_agent_depth: ContextVar[Optional[int]] = ContextVar(
+    "_max_agent_depth",
+    default=0,
+)
 
 def new_history() -> list:
     return [{"role": "system", "content": SYSTEM}]
 
 
 def run_agent(user_message: str, history: Optional[list] = None,
-    tool_gate: Optional[ToolGate] = None) -> tuple[str, list]:
+    tool_gate: Optional[ToolGate] = None, max_depth: int = 0) -> tuple[str, list]:
     """Odpowiada na jedną wiadomość użytkownika.
 
     Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
@@ -39,6 +43,7 @@ def run_agent(user_message: str, history: Optional[list] = None,
     messages.append({"role": "user", "content": user_message})
 
     token = _current_tool_gate.set(tool_gate)
+    max_depth_token = _max_agent_depth.set(max_depth)
     try:
         for step in range(MAX_TOOL_STEPS):
             msg = llm_client.chat(messages, tools=TOOLS)
@@ -71,3 +76,4 @@ def run_agent(user_message: str, history: Optional[list] = None,
 
     finally:
         _current_tool_gate.reset(token)
+        _max_agent_depth.reset(max_depth_token)
