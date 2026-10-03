@@ -28,4 +28,6 @@ User message:
 Detected values:
 {entities}
 
-Reply with a JSON object only, mapping each number to "send" or "mask", for example: {{"1": "mask", "2": "send"}}
+Reply with a JSON object only, mapping each number to a decision and a short reason (one sentence,
+in English), for example:
+{{"1": {{"decision": "mask", "reason": "a private customer"}}, "2": {{"decision": "send", "reason": "a public company"}}}}

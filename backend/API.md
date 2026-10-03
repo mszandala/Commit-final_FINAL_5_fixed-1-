@@ -204,6 +204,37 @@ z `afterId` — kolejne wiersze po nim:
 `leaksToChatbot` (ile zamaskowanych wartości trafiło do chatbota; oczekiwane 0) oraz `trail` —
 zdarzenia audytu tury z polem `zone` (`security`, `chatbot`, `local`), bez surowych wartości.
 
+### Kroki tury
+
+Każda tura ma `level` (`info`, `warn`, `block` — najwyższy poziom spośród jej kroków) i `stepCount`.
+Kroki zwraca `GET /events/{id}` oraz `GET /events?steps=true`; `minLevel=warn` zostawia tury
+z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
+
+```json
+{
+  "index": 4,
+  "kind": "tool_call",
+  "label": "Tool call",
+  "zone": "security",
+  "level": "block",
+  "summary": "read_employee_records(limit=1) rejected by Tool permissions: ...",
+  "atMs": 1840,
+  "durationMs": 2,
+  "details": { "tool": "read_employee_records", "allowed": false, "stage": "tool_whitelist" }
+}
+```
+
+- `kind`: `prompt_guard`, `company_policy`, `prompt_masking`, `pii_judge`, `model_call`, `tool_call`,
+  `output_filter`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
+- `zone`: `security`, `chatbot`, `local`; nazwy w `GET /meta → zones`.
+- `level`: `info` — bez zastrzeżeń, `warn` — flaga, ostrzeżenie albo ukrycie danych, `block` — blokada,
+  odrzucone narzędzie albo błąd.
+- `summary` jest po angielsku; powody decyzji strażników zostają w oryginale.
+- `atMs` to czas od początku tury, `durationMs` — czas od poprzedniego kroku.
+- `details` to pełne zdarzenie audytu, bez surowych wartości wrażliwych.
+
+Log jest zapisywany w `backend/audit/turns.jsonl` i wczytywany przy starcie serwera.
+
 `GET /stats`:
 
 ```json
@@ -214,6 +245,6 @@ zdarzenia audytu tury z polem `zone` (`security`, `chatbot`, `local`), bez surow
 ## Czego w v1 nie ma
 
 - **Załączniki.** Composer pozwala dodać pliki, ale backend nie ma jeszcze ich obsługi.
-- **Trwałość.** Log i konfiguracja znikają po restarcie serwera; zostają budżety (`spending.db`)
-  i szczegółowy log audytu (`audit/events.jsonl`).
+- **Trwałość konfiguracji i rozmów.** Znikają po restarcie serwera; zostają log (`audit/turns.jsonl`,
+  `audit/events.jsonl`) i budżety (`spending.db`).
 - **Uwierzytelnianie.** Każdy klient może wybrać dowolną rolę i zmienić konfigurację.

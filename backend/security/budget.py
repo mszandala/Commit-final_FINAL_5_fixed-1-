@@ -82,7 +82,10 @@ class Budget:
             return {"decision": "block", "stage": "budget", "reason": "Dzienny budżet tokenów został wyczerpany"}
         return None
 
-    def reset(self) -> None:
+    def reset(self, role: Optional[str] = None) -> None:
+        """Zeruje zużycie tokenów i wydatki jednej roli albo — bez argumentu — wszystkich ról."""
+        role_ids = [ROLES[role]["id"]] if role else [cfg["id"] for cfg in ROLES.values()]
+        marks = ", ".join("?" * len(role_ids))
         with self._lock, closing(self._connect()) as conn, conn:
-            conn.execute("DELETE FROM token_usage")
-            conn.execute("DELETE FROM spending")
+            conn.execute(f"DELETE FROM token_usage WHERE user_type IN ({marks})", role_ids)
+            conn.execute(f"DELETE FROM spending WHERE user_type IN ({marks})", role_ids)

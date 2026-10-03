@@ -23,10 +23,12 @@ async function request(path, { method = 'GET', body } = {}) {
 
 export const getMeta = () => request('/meta')
 export const getRoles = () => request('/roles')
+export const resetBudget = (roleId) =>
+  request(`/budget/reset${roleId ? `?roleId=${encodeURIComponent(roleId)}` : ''}`, { method: 'POST' })
 export const getConfig = () => request('/config')
 export const getConfigDefaults = () => request('/config/defaults')
 export const updateConfig = (update) => request('/config', { method: 'PUT', body: update })
-export const getEvents = () => request('/events')
+export const getEvents = () => request('/events?steps=true')
 export const endConversation = (id) => request(`/conversations/${id}`, { method: 'DELETE' })
 
 // One chat turn over SSE. `onEvent(kind, data)` gets each stage and tool event;
