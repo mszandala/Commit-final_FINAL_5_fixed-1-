@@ -180,6 +180,9 @@ def update_config(update: schemas.ConfigUpdate):
     provider = update.provider or SETTINGS.provider
     model = update.model or SETTINGS.model
     presets = {m["id"]: m["provider"] for m in MODEL_PRESETS}
+    # Model z .env może spoza listy, więc odrzucamy tylko nowy, nieznany wybór.
+    if model != SETTINGS.model and model not in presets:
+        raise HTTPException(422, f"Nieznany model: {model}")
     if presets.get(model, provider) != provider:
         raise HTTPException(422, f"Model {model} nie należy do providera {provider}")
 

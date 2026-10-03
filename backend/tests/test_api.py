@@ -216,6 +216,8 @@ def test_config_read_update_reset():
     assert "read_file" in ROLES["administrator"]["allowed_tools"]
 
     assert client.put(f"{API}/config", json={"provider": "ollama", "model": "google/gemma-4-26b-a4b-it"}).status_code == 422
+    assert client.put(f"{API}/config", json={"model": "nope"}).status_code == 422
+    assert client.get(f"{API}/config").json()["model"] == "gemma4:12b"
     assert client.put(f"{API}/config", json={"sensitivity": "extreme"}).status_code == 422
     assert client.put(f"{API}/config", json={"roles": [{**basic, "access": ["nope"]}]}).status_code == 422
     assert client.put(f"{API}/config", json={"guardMode": "off"}).status_code == 422
