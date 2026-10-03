@@ -29,7 +29,8 @@ def test_openrouter_provider_invoked():
     )
     mock_resp = SimpleNamespace(choices=[mock_choice])
 
-    with patch("chatbot.llm_client.OpenAI") as mock_openai_cls:
+    with patch("chatbot.llm_client.OpenAI") as mock_openai_cls, \
+            patch.object(llm_client.SETTINGS, "openrouter_api_key", "sk-or-v1-test"):
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
         mock_openai_cls.return_value = mock_client
