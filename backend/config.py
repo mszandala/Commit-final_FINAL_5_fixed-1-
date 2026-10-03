@@ -12,7 +12,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
 # Konfiguracja OpenRouter
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 
 # Konfiguracja Ollama
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
