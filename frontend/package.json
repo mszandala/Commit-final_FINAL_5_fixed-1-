@@ -8,15 +8,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fontsource/figtree": "^5.3.0",
     "@fontsource/instrument-sans": "^5.3.0",
-    "@fontsource/lora": "^5.3.0",
-    "@fontsource/sofia-sans": "^5.3.0",
     "lucide-react": "^1.51.0",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@fontsource/figtree": "^5.3.0",
+    "@fontsource/lora": "^5.3.0",
+    "@fontsource/sofia-sans": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "tailwindcss": "^4.3.3",

@@ -5,7 +5,8 @@ import { formatNumber } from '../format'
 
 const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked']
 
-// Left-edge bar marks the decision; the row tints on hover.
+// Left-edge bar marks the decision; the row tints on hover. Screen readers and the
+// time tooltip get the decision as text.
 const BARS = {
   Allowed: 'shadow-[inset_4px_0_0_var(--color-green)]',
   Redacted: 'shadow-[inset_4px_0_0_var(--color-amber)]',
@@ -100,8 +101,9 @@ export default function Logs() {
                 <tr key={e.id} className={TINTS[e.decision]}>
                   <td
                     className={`whitespace-nowrap border-b border-line px-2.5 py-1 pl-4 ${BARS[e.decision]}`}
-                    title={e.time.toLocaleString('en-GB')}
+                    title={`${e.decision}, ${e.time.toLocaleString('en-GB')}`}
                   >
+                    <span className="sr-only">{e.decision}, </span>
                     <span className="mr-2 text-grey">{dateOf(e.time)}</span>
                     {timeOf(e.time)}
                   </td>

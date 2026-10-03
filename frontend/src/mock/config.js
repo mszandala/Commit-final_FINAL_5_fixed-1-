@@ -52,9 +52,10 @@ const role = (id, label, access, pii) => ({ id, label, access, pii })
 const config = {
   provider: 'openrouter',
   apiKey: 'sk-or-v1-example-key',
-  model: 'google/gemma-4-26b-a4b-it',
+  // Backend defaults: free model tier, warn-only prompt guard.
+  model: 'google/gemma-4-26b-a4b-it:free',
   sensitivity: 1,
-  guardMode: 'block',
+  guardMode: 'warn',
   maskPii: true,
   roles: [
     role('basic_user', 'Employee', ['projects'], ['ORGANIZATION', 'PROJECT']),

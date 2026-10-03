@@ -22,10 +22,10 @@ const seed = (time, role, decision, control, reason, tokens, latency) => {
 let events = [
   seed('08:12:04', 'banker', 'Allowed', '', '', 2140, 1830),
   seed('08:31:47', 'basic_user', 'Allowed', '', '', 1320, 1210),
-  seed('08:52:19', 'analyst', 'Blocked', 'Prompt guard', 'Analyst role has no access to bank client data', 0, 38),
+  seed('08:52:19', 'analyst', 'Blocked', 'Tool permissions', 'Tool read_client_records is not available for role Analyst', 1460, 1580),
   seed('09:05:33', 'hr', 'Allowed', '', '', 3860, 2410),
   seed('09:14:02', 'it', 'Redacted', 'PII policy', 'Masked: EMAIL', 1710, 1690),
-  seed('09:40:58', 'basic_user', 'Blocked', 'Prompt guard', 'Tried to ignore the system instructions', 0, 21),
+  seed('09:40:58', 'basic_user', 'Allowed', 'Prompt guard', 'Flagged: The message tries to override the system instructions', 760, 1240),
   seed('10:02:11', 'portfolio_manager', 'Allowed', '', '', 5240, 3120),
   seed('10:17:45', 'lawyer', 'Blocked', 'Tool permissions', 'Tool read_stock_prices is not available for role Lawyer', 2980, 2240),
   seed('10:26:09', 'admin', 'Blocked', 'Code guard', "Import 'subprocess': runs processes", 2410, 1960),

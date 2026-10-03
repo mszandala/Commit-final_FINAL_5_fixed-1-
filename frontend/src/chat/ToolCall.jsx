@@ -17,10 +17,11 @@ import StatusTag from '../ui/StatusTag'
 // Project files are named owner_repo; people know them by the repo.
 const project = (name) => name.split('_').slice(1).join('_') || name
 
-const filtered = (label, { column, value }) => (column ? `${label}, ${column} ${value}` : label)
+const filtered = (label, { column, value, start_row }) =>
+  [label, column && `${column} ${value}`, start_row && `from row ${start_row + 1}`].filter(Boolean).join(', ')
 
 const TOOLS = {
-  list_projects: { icon: FileSearch, label: (a) => (a.search ? `Search projects for “${a.search}”` : 'List projects') },
+  list_projects: { icon: FileSearch, label: (a) => (a.search ? `Search projects for "${a.search}"` : 'List projects') },
   read_project: { icon: BookOpen, label: (a) => `Read ${project(a.name)}` },
   read_employee_records: { icon: Users, label: (a) => filtered('Read employee records', a) },
   read_client_records: { icon: Landmark, label: (a) => filtered('Read client records', a) },

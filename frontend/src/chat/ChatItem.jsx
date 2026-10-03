@@ -1,8 +1,9 @@
 import { Ban, CloudOff, EyeOff, Flag, RotateCw } from 'lucide-react'
-import { CONTROLS, REDACTED_PII } from '../mock/config'
+import { CONTROLS } from '../mock/config'
 import Button from '../ui/Button'
 import Notice from '../ui/Notice'
 import Attachment from './Attachment'
+import Markdown from './Markdown'
 import Pending from './Pending'
 import ToolCall from './ToolCall'
 
@@ -14,23 +15,6 @@ const VERDICTS = {
 
 // "Prompt guard" -> "prompt guard", but "PII policy" stays.
 const midSentence = (name) => (/^[A-Z]{2}/.test(name) ? name : name[0].toLowerCase() + name.slice(1))
-
-// The backend replaces redacted values with [TYPE]; show those as tags.
-function Reply({ text }) {
-  return (
-    <p className="whitespace-pre-wrap leading-relaxed">
-      {text.split(/\[([A-Z-]+)\]/).map((part, i) =>
-        i % 2 === 0 ? (
-          part
-        ) : (
-          <span key={i} className="rounded-sm bg-amber/25 px-1 py-px text-xs font-semibold uppercase tracking-wide">
-            {REDACTED_PII[part] ?? part}
-          </span>
-        ),
-      )}
-    </p>
-  )
-}
 
 export default function ChatItem({ item, onRetry }) {
   if (item.kind === 'session') {
@@ -50,7 +34,7 @@ export default function ChatItem({ item, onRetry }) {
           <Attachment key={`${file.name}-${i}`} file={file} />
         ))}
         {item.text && (
-          <p className="max-w-[85%] whitespace-pre-wrap rounded-md bg-blue-light/35 px-3.5 py-2">{item.text}</p>
+          <p className="max-w-[85%] cursor-text whitespace-pre-wrap rounded-md bg-blue-light/35 px-3.5 py-2">{item.text}</p>
         )}
       </div>
     )
@@ -66,8 +50,6 @@ export default function ChatItem({ item, onRetry }) {
     )
   }
 
-  const notice = item.verdict && VERDICTS[item.verdict.decision]
-
   return (
     <div className="space-y-3">
       {item.tools.length > 0 && (
@@ -78,12 +60,15 @@ export default function ChatItem({ item, onRetry }) {
         </div>
       )}
       {item.kind === 'pending' && <Pending stage={item.stage} />}
-      {item.text && <Reply text={item.text} />}
-      {notice && (
-        <Notice icon={notice.icon} tone={notice.tone} title={notice.title(midSentence(CONTROLS[item.verdict.stage]))}>
-          <p className="text-ink">{item.verdict.reason}</p>
-        </Notice>
-      )}
+      {item.text && <Markdown text={item.text} />}
+      {item.verdicts?.map((verdict, i) => {
+        const notice = VERDICTS[verdict.decision]
+        return (
+          <Notice key={i} icon={notice.icon} tone={notice.tone} title={notice.title(midSentence(CONTROLS[verdict.stage]))}>
+            <p className="text-ink">{verdict.reason}</p>
+          </Notice>
+        )
+      })}
     </div>
   )
 }

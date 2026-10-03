@@ -9,7 +9,7 @@ const TABS = [
 ]
 
 export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setTab] = useState('logs')
 
   return (
     <section className="flex h-full flex-col">
