@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Settings } from 'lucide-react'
 import cat from '../assets/cat.jpg'
 import Logs from './Logs'
 
@@ -28,10 +29,23 @@ export default function Dashboard() {
             </button>
           ))}
         </nav>
+        <button
+          role="tab"
+          aria-selected={tab === 'config'}
+          aria-label="Config"
+          onClick={() => setTab('config')}
+          className={`my-auto ml-auto grid size-8 place-items-center rounded-md hover:bg-page ${
+            tab === 'config' ? 'text-navy' : 'text-grey hover:text-ink'
+          }`}
+        >
+          <Settings size={18} />
+        </button>
       </header>
       <div role="tabpanel" className="min-h-0 flex-1">
         {tab === 'logs' ? (
           <Logs />
+        ) : tab === 'config' ? (
+          <div className="h-full" />
         ) : (
           <div className="grid h-full place-items-center p-6">
             <img src={cat} alt="Cat" className="w-[480px]" />

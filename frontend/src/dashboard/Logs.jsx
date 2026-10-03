@@ -5,16 +5,16 @@ import { formatNumber } from '../format'
 
 const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked']
 
-// Left-edge bar and row tint mark the decision.
+// Left-edge bar marks the decision; the row tints on hover.
 const BARS = {
   Allowed: 'shadow-[inset_4px_0_0_var(--color-green)]',
   Redacted: 'shadow-[inset_4px_0_0_var(--color-amber)]',
   Blocked: 'shadow-[inset_4px_0_0_var(--color-red)]',
 }
 const TINTS = {
-  Allowed: 'bg-green/10 hover:bg-green/20',
-  Redacted: 'bg-amber/10 hover:bg-amber/20',
-  Blocked: 'bg-red/10 hover:bg-red/20',
+  Allowed: 'hover:bg-green/10',
+  Redacted: 'hover:bg-amber/10',
+  Blocked: 'hover:bg-red/10',
 }
 
 const COLUMNS = [
