@@ -29,17 +29,55 @@ CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "st
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
 
-# Tymczasowo: dopóki nie ma narzędzi domenowych, każda rola ma oba narzędzia ogólne.
-# Docelowe whitelisty, opisy i allowed_pii — po ustaleniu faktycznych danych (ARCHITECTURE.md).
+# Narzędzia pogrupowane po domenach danych (podfoldery data/).
 _GENERIC_TOOLS = ["list_files", "read_file"]
+_PROJECTS  = ["list_projects", "read_project"]
+_HR        = ["read_employee_records"]
+_CLIENTS   = ["read_client_records"]
+_CAMPAIGNS = ["read_bank_campaigns"]
+_MARKET    = ["read_stock_prices", "list_earnings_calls", "read_earnings_call"]
+_CODE      = ["run_python"]
+_SUBAGENT  = ["create_subagent"]
 
 ROLES = {
-    "podstawowy użytkownik": {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "kadry":                 {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "administrator":         {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python", "create_subagent"], "allowed_pii": []},
-    "bankier":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "IT":                    {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python", "create_subagent"], "allowed_pii": []},
-    "analityk":              {"description": "", "allowed_tools": _GENERIC_TOOLS + ["create_subagent"], "allowed_pii": []},
-    "prawnik":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "Portfolio Manager":     {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
+    "podstawowy użytkownik": {
+        "description": "Pracownik bez specjalnych uprawnień; korzysta z ogólnej bazy wiedzy o projektach.",
+        "allowed_tools": _PROJECTS,
+        "allowed_pii": [],
+    },
+    "kadry": {
+        "description": "Dział kadr; pracuje na danych pracowników: stanowiska, wynagrodzenia, oceny, rotacja.",
+        "allowed_tools": _PROJECTS + _HR,
+        "allowed_pii": ["SALARY", "NAME"],
+    },
+    "administrator": {
+        "description": "Administrator systemu z pełnym dostępem do wszystkich danych.",
+        "allowed_tools": _PROJECTS + _HR + _CLIENTS + _CAMPAIGNS + _MARKET + _CODE + _GENERIC_TOOLS + _SUBAGENT,
+        "allowed_pii": ["NAME", "SALARY", "ORGANIZATION", "LOCATION", "PASSWORD", "PROJECT", "PHONE-NO", "EMAIL", "CREDIT-CARD-NO"],
+    },
+    "bankier": {
+        "description": "Doradca bankowy; obsługuje klientów banku i kampanie sprzedaży lokat.",
+        "allowed_tools": _PROJECTS + _CLIENTS + _CAMPAIGNS,
+        "allowed_pii": ["NAME", "PHONE-NO", "EMAIL"],
+    },
+    "IT": {
+        "description": "Dział IT; korzysta z dokumentacji technicznej projektów.",
+        "allowed_tools": _PROJECTS + _CODE + _SUBAGENT,
+        "allowed_pii": ["PASSWORD", "PROJECT"],
+    },
+    "analityk": {
+        "description": "Analityk danych; pracuje na anonimowych danych kampanii oraz danych rynkowych.",
+        "allowed_tools": _PROJECTS + _CAMPAIGNS + _MARKET + _SUBAGENT,
+        "allowed_pii": [],
+    },
+    "prawnik": {
+        "description": "Dział prawny; analizuje publiczne wypowiedzi spółek z telekonferencji wynikowych.",
+        "allowed_tools": _PROJECTS + ["list_earnings_calls", "read_earnings_call"],
+        "allowed_pii": [],
+    },
+    "Portfolio Manager": {
+        "description": "Zarządzający portfelem; analizuje notowania i telekonferencje wynikowe spółek.",
+        "allowed_tools": _PROJECTS + _MARKET,
+        "allowed_pii": [],
+    },
 }
