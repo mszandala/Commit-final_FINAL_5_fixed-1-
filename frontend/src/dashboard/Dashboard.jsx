@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import cat from '../assets/cat.jpg'
 import Logs from './Logs'
+import Overview from './Overview'
 
 const TABS = [
   { id: 'logs', label: 'Logs' },
@@ -9,6 +9,12 @@ const TABS = [
 
 export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
   const [tab, setTab] = useState('logs')
+  // Query or filters the dashboard opened the log with; picking the tab by hand starts it clean.
+  const [logsView, setLogsView] = useState(undefined)
+  const show = (id, view) => {
+    setLogsView(view)
+    setTab(id)
+  }
 
   return (
     <section className="flex h-full flex-col">
@@ -19,7 +25,7 @@ export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
               key={t.id}
               role="tab"
               aria-selected={!configOpen && tab === t.id}
-              onClick={() => (configOpen ? onLeaveConfig(() => setTab(t.id)) : setTab(t.id))}
+              onClick={() => (configOpen ? onLeaveConfig(() => show(t.id)) : show(t.id))}
               className={`-mb-px border-b-2 text-sm ${
                 !configOpen && tab === t.id ? 'border-navy text-navy' : 'border-transparent text-grey hover:text-ink'
               }`}
@@ -39,13 +45,7 @@ export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
         </button>
       </header>
       <div role="tabpanel" className="min-h-0 flex-1">
-        {tab === 'logs' ? (
-          <Logs />
-        ) : (
-          <div className="grid h-full place-items-center p-6">
-            <img src={cat} alt="Cat" className="w-[480px]" />
-          </div>
-        )}
+        {tab === 'logs' ? <Logs initial={logsView} /> : <Overview onOpenLogs={(view) => show('logs', view)} />}
       </div>
     </section>
   )

@@ -94,13 +94,18 @@ function Step({ step, zones, found }) {
   )
 }
 
-export default function Logs() {
+// `initial` opens the log on a query or filters, when the dashboard sends someone here.
+export default function Logs({ initial = {} }) {
   const meta = useMeta()
-  const [level, setLevel] = useState('info')
-  const [kind, setKind] = useState('all')
+  const [level, setLevel] = useState(initial.level ?? 'info')
+  const [kind, setKind] = useState(initial.kind ?? 'all')
   const [zone, setZone] = useState('all')
-  const [query, setQuery] = useState('')
-  const [advanced, setAdvanced] = useState(false)
+  // Each mode keeps its own query, so switching away and back finds the old one still there.
+  const [queries, setQueries] = useState({ plain: '', advanced: initial.query ?? '' })
+  const [advanced, setAdvanced] = useState(initial.query !== undefined)
+  const mode = advanced ? 'advanced' : 'plain'
+  const query = queries[mode]
+  const setQuery = (value) => setQueries({ ...queries, [mode]: value })
   // Turns opened or closed by hand; the rest follow `expandAll`.
   const [toggled, setToggled] = useState({})
   const [expandAll, setExpandAll] = useState(false)
