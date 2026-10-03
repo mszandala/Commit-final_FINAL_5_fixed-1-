@@ -7,7 +7,7 @@ from tools.registry import TOOLS, run_tool
 SYSTEM = (
     "You are a helpful assistant answering questions from the company knowledge base. "
     "You have file tools available. Use them whenever the user asks about data or documents. "
-    "You have a total of 10 tool calls per message. if that's not enough, tell it directly. "
+    f"You have a total of {MAX_TOOL_STEPS} tool calls per message. if that's not enough, tell it directly. "
     "Be concise."
 )
 
