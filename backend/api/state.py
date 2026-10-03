@@ -136,6 +136,8 @@ def _decide(result: Optional[pipeline.TurnResult], verdict: Optional[dict], tool
         return "Blocked", denied["stage"], f'{denied["tool"]}: {denied["reason"]}'
     if verdict and verdict["decision"] == "redact":
         return "Redacted", verdict["stage"], verdict["reason"]
+    if verdict and verdict["decision"] == "refuse":
+        return "Refused", verdict["stage"], verdict["reason"]
     if verdict and verdict["decision"] == "warn":
         return "Allowed", verdict["stage"], f'Oflagowano: {verdict["reason"]}'
     if result and result.output.get("found"):

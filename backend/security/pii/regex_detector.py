@@ -28,6 +28,19 @@ EMPLOYEE_ID_PATTERN = re.compile(
 )
 
 
+# Zapisy dat i zakresów lat pasują do wzorca telefonu: 2024-01-05, 05-01-2024, 2018-2024, 2024 01 05.
+_DATE_LIKE = re.compile(
+    r'(?:(?:19|20)\d{2}[-\s](?:0?[1-9]|1[0-2])[-\s](?:0?[1-9]|[12]\d|3[01])'
+    r'|(?:0?[1-9]|[12]\d|3[01])[-\s](?:0?[1-9]|1[0-2])[-\s](?:19|20)\d{2}'
+    r'|(?:19|20)\d{2}\s?-\s?(?:19|20)\d{2})'
+)
+
+
+def is_date_like(text: str) -> bool:
+    """Czy ciąg cyfr to data albo zakres lat, a nie numer telefonu."""
+    return bool(_DATE_LIKE.fullmatch(text.strip()))
+
+
 def _luhn_ok(digits: str) -> bool:
     total = 0
     for i, d in enumerate(reversed(digits)):
@@ -95,7 +108,7 @@ def detect_regex_pii(text: str) -> list[dict]:
 
     # 4. Numery telefonów (z pominięciem ciągów rozpoznanych jako karty)
     for m in PHONE_PATTERN.finditer(text):
-        if any(m.start() < end and start < m.end() for start, end in cards):
+        if any(m.start() < end and start < m.end() for start, end in cards) or is_date_like(m.group(0)):
             continue
         entities.append({
             "type": "PHONE-NO",

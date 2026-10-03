@@ -7,6 +7,7 @@ from collections import Counter
 from typing import Optional
 
 from config import CONTROLS
+from security.refusal_detector import CATEGORIES as REFUSAL_CATEGORIES
 
 LEVELS = ["info", "warn", "block"]
 
@@ -19,6 +20,7 @@ STEP_KINDS = {
     "model_call":     "Model call",
     "tool_call":      "Tool call",
     "output_filter":  "Reply filter",
+    "refusal":        "Chatbot refusal",
     "budget":         "Budget",
     "error":          "Error",
 }
@@ -132,6 +134,13 @@ def _output_filter(e: dict) -> tuple[str, str]:
     return level, (text[0].upper() + text[1:]) if text else "Nothing to hide in the reply"
 
 
+def _refusal(e: dict) -> tuple[str, str]:
+    cause = (f"after rejected tool: {', '.join(e['after_denied_tools'])}" if e.get("after_denied_tools")
+             else REFUSAL_CATEGORIES.get(e.get("category"), e.get("category")))
+    how = "keywords" if e.get("method") == "keywords" else f"similarity to known refusals {e.get('score')}"
+    return "warn", f"The chatbot declined the request ({cause}); detected by {how}"
+
+
 _DESCRIBE = {
     "prompt_guard": _prompt_guard,
     "company_policy": _company_policy,
@@ -140,6 +149,7 @@ _DESCRIBE = {
     "model_call": _model_call,
     "tool_call": _tool_call,
     "output_filter": _output_filter,
+    "refusal": _refusal,
     "budget": lambda e: ("block", e.get("reason") or "Budget exhausted"),
     "error": lambda e: ("block", f"Model call failed: {e.get('error')}"),
 }
