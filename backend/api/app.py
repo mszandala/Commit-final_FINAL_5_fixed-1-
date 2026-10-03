@@ -162,6 +162,13 @@ def roles():
     ]
 
 
+@router.post("/budget/reset", response_model=list[schemas.Role], tags=["roles"],
+             summary="Zeruje zużycie tokenów i wydatki roli (roleId) albo wszystkich ról; zwraca role jak GET /roles")
+def reset_budget(role_id: Optional[str] = Query(None, alias="roleId")):
+    state.budget.reset(_role_name(role_id) if role_id else None)
+    return roles()
+
+
 @router.get("/config", response_model=schemas.Config, tags=["config"])
 def get_config():
     return _config()

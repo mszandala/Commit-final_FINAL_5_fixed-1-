@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Gauge } from 'lucide-react'
-import { endConversation, streamChat } from '../api'
+import { endConversation, resetBudget, streamChat } from '../api'
 import { refreshEvents } from '../events'
 import { useMeta } from '../meta'
 import ChatItem from './ChatItem'
@@ -75,10 +75,27 @@ export default function Chat({ people }) {
     send(text)
   }
 
+  // Zeroes token and spending usage for one role, or for everyone when `id` is null.
+  async function clearUsage(id) {
+    try {
+      const roles = await resetBudget(id)
+      setBudgets(Object.fromEntries(roles.map((r) => [r.id, r.budget])))
+    } catch {
+      // The menu keeps showing the old figures; the next turn refreshes them.
+    }
+  }
+
   return (
     <section className="flex h-full flex-col bg-white">
       <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
-        <UserMenu people={people} roleId={roleId} account={account} disabled={!!pending} onSwitch={switchUser} />
+        <UserMenu
+          people={people}
+          roleId={roleId}
+          account={account}
+          disabled={!!pending}
+          onSwitch={switchUser}
+          onResetBudget={clearUsage}
+        />
       </header>
 
       <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">

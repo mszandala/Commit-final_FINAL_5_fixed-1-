@@ -3,7 +3,7 @@ import Avatar from '../ui/Avatar'
 import BudgetBar from '../ui/BudgetBar'
 import Dropdown from '../ui/Dropdown'
 
-export default function UserMenu({ people, roleId, account, disabled, onSwitch }) {
+export default function UserMenu({ people, roleId, account, disabled, onSwitch, onResetBudget }) {
   const current = people.find((p) => p.id === roleId)
 
   return (
@@ -24,6 +24,19 @@ export default function UserMenu({ people, roleId, account, disabled, onSwitch }
         <>
           <div className="border-b border-line px-3.5 py-3">
             <BudgetBar used={account.used} limit={account.limit} />
+            <div className="mt-2 flex items-center justify-between text-[13px] text-grey">
+              <span>
+                Spent ${account.spent.toFixed(4)} of ${account.spendingLimit.toFixed(2)}
+              </span>
+              <span className="flex gap-3">
+                <button disabled={disabled} onClick={() => onResetBudget(roleId)} className="hover:text-ink disabled:opacity-50">
+                  Reset usage
+                </button>
+                <button disabled={disabled} onClick={() => onResetBudget(null)} className="hover:text-ink disabled:opacity-50">
+                  Reset all
+                </button>
+              </span>
+            </div>
           </div>
           <ul className="p-1.5">
             {people.map((p) => (

@@ -418,3 +418,17 @@ def test_meta_names_step_kinds_and_zones():
     meta = client.get(f"{API}/meta").json()
     assert {"prompt_guard", "tool_call", "model_call", "company_policy", "output_filter", "budget"} <= set(meta["stepKinds"])
     assert set(meta["zones"]) == {"security", "chatbot", "local"}
+
+
+def test_budget_reset_for_one_role_and_for_all(llm):
+    llm += [_reply("ok"), _reply("ok")]
+    _chat("lawyer", "Cześć")
+    _chat("banker", "Cześć")
+
+    roles = {r["id"]: r["budget"] for r in client.post(f"{API}/budget/reset?roleId=lawyer").json()}
+    assert (roles["lawyer"]["used"], roles["lawyer"]["spent"]) == (0, 0.0)
+    assert (roles["banker"]["used"], roles["banker"]["spent"]) == (100, 0.01)
+
+    roles = {r["id"]: r["budget"] for r in client.post(f"{API}/budget/reset").json()}
+    assert all(b["used"] == 0 and b["spent"] == 0.0 for b in roles.values())
+    assert client.post(f"{API}/budget/reset?roleId=nobody").status_code == 404
