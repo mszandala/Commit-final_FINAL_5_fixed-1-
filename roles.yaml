@@ -1,0 +1,14 @@
+permissions:
+  chat.general:     "Ogólne pytania, rozmowa, bez narzędzi i bez danych firmowych"
+  tool.get_weather: "Sprawdzanie pogody"
+  tool.run_sql:     "Wykonywanie zapytań do bazy danych"
+  data.sales_read:  "Odczyt danych sprzedażowych"
+  data.hr_read:     "Odczyt danych kadrowych i wynagrodzeń"
+
+roles:
+  guest:
+    permissions: [chat.general]
+  analyst:
+    permissions: [chat.general, tool.get_weather, tool.run_sql, data.sales_read]
+  admin:
+    permissions: ["*"]
