@@ -23,7 +23,7 @@ export default function UserMenu({ people, roleId, account, disabled, onSwitch }
       {(close) => (
         <>
           <div className="border-b border-line px-3.5 py-3">
-            <BudgetBar used={account.used} limit={account.limit} />
+            <BudgetBar {...account} />
           </div>
           <ul className="p-1.5">
             {people.map((p) => (

@@ -7,12 +7,18 @@ import ChatItem from './ChatItem'
 import Composer from './Composer'
 import Examples from './Examples'
 import UserMenu from './UserMenu'
+import { tightestLimit } from '../ui/BudgetBar'
 
 const BUDGET_WARNING = 0.8
 
+const BUDGET_NOTICE = {
+  tokens: (share) => (share < 1 ? `${Math.round(share * 100)}% of today's budget used` : "Today's budget is used up"),
+  spending: (share) => (share < 1 ? `${Math.round(share * 100)}% of the spending limit used` : 'Spending limit reached'),
+}
+
 let nextId = 1
 
-// `people` is GET /roles: each role with its example user and today's token budget.
+// `people` is GET /roles: each role with its example user and budget (daily tokens, total spending).
 export default function Chat({ people }) {
   const meta = useMeta()
   const [roleId, setRoleId] = useState('basic_user')
@@ -28,7 +34,7 @@ export default function Chat({ people }) {
 
   const person = people.find((p) => p.id === roleId)
   const account = budgets[roleId]
-  const share = account.used / account.limit
+  const { kind, share } = tightestLimit(account)
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -94,7 +100,7 @@ export default function Chat({ people }) {
         {share >= BUDGET_WARNING && (
           <p className={`flex items-center gap-1.5 text-[13px] ${share < 1 ? 'text-amber-text' : 'text-red-text'}`}>
             <Gauge size={14} />
-            {share < 1 ? `${Math.round(share * 100)}% of today's budget used` : "Today's budget is used up"}
+            {BUDGET_NOTICE[kind](share)}
           </p>
         )}
         <Composer disabled={!!pending} onSend={submit} />

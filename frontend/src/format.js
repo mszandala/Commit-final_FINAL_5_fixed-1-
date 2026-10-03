@@ -4,3 +4,6 @@ export const formatNumber = (n) =>
 
 export const formatSize = (bytes) =>
   bytes < 1024 * 1024 ? `${formatNumber(Math.max(1, bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+
+// 0.00048 -> "$0.0005", 0.5 -> "$0.50": per-turn costs are fractions of a cent, limits are not
+export const formatUsd = (n) => `$${n >= 0.01 || n === 0 ? n.toFixed(2) : n.toFixed(4)}`
