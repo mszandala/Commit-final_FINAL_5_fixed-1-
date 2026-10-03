@@ -7,4 +7,6 @@ __pychache__/
 *.pyc
 .env
 pyvenv.cfg
+plan/
+graphify-out/
 

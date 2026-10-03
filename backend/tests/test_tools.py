@@ -17,7 +17,7 @@ def data_dir(tmp_path, monkeypatch):
         "﻿Age,Department,MonthlyIncome\n41,Sales,5993\n49,R&D,5130\n33,Sales,2909\n", encoding="utf-8")
     (tmp_path / "bank_data").mkdir()
     (tmp_path / "bank_data" / "bank.csv").write_text(
-        '"age";"job";"y"\n30;"unemployed";"no"\n33;"services";"yes"\n', encoding="utf-8")
+        'age,job,deposit\n30,unemployed,no\n33,services,yes\n', encoding="utf-8")
     market = tmp_path / "stock_market"
     (market / "cleaned_ECTs_dataset" / "Apple").mkdir(parents=True)
     (market / "cleaned_ECTs_dataset" / "Apple" / "2018_Q1_aapl_processed.txt").write_text("Good day.", encoding="utf-8")
@@ -45,7 +45,7 @@ def test_csv_filter_and_paging(data_dir):
     out = run_tool("read_employee_records", {"column": "Department", "value": "Sales", "start_row": 1})
     assert out == "Age,Department,MonthlyIncome\n33,Sales,2909\n"
     assert run_tool("read_employee_records", {"column": "Nope", "value": "x"}).startswith("Unknown column")
-    assert run_tool("read_bank_campaigns", {"column": "y", "value": "yes"}) == "age,job,y\n33,services,yes\n"
+    assert run_tool("read_bank_campaigns", {"column": "deposit", "value": "yes"}) == "age,job,deposit\n33,services,yes\n"
     assert run_tool("read_client_records", {}).startswith("File not found")
 
 

@@ -1,0 +1,48 @@
+services:
+  executor:
+    image: bank-python-executor:local
+    build:
+      context: .
+      dockerfile: Dockerfile.executor
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=16m"]
+    volumes:
+      - executor-socket:/run/bank-executor
+  proxy:
+    image: bank-gemma-proxy:local
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    depends_on: [executor]
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 4g
+    cpus: 2.0
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    environment:
+      LLM_PROVIDER: openrouter
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-26b-a4b-it}
+      PROXY_API_KEYS: ${PROXY_API_KEYS:?Set PROXY_API_KEYS}
+      PYTHON_EXECUTOR_SOCKET: /run/bank-executor/executor.sock
+      HF_HOME: /cache/huggingface
+    volumes:
+      - executor-socket:/run/bank-executor
+      - type: bind
+        source: ./backend/data
+        target: /app/data
+        read_only: true
+      - pii-model-cache:/cache
+
+volumes:
+  executor-socket:
+  pii-model-cache:

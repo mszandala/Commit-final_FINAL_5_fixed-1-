@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY backend/requirements-proxy.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY backend/proxy.py backend/config.py /app/
+COPY backend/chatbot /app/chatbot
+COPY backend/tools /app/tools
+COPY backend/security/*.py /app/security/
+COPY backend/security/common /app/security/common
+COPY backend/security/pii /app/security/pii
+RUN install -d -o 10001 -g 10001 -m 0700 /run/bank-executor /cache \
+    && install -o 10001 -g 10001 /dev/null /run/bank-executor/.keep \
+    && install -o 10001 -g 10001 /dev/null /cache/.keep
+USER 10001:10001
+EXPOSE 8080
+CMD ["uvicorn", "proxy:app", "--host", "0.0.0.0", "--port", "8080", "--lifespan", "on"]

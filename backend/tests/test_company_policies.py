@@ -174,7 +174,7 @@ def test_11_verbatim_fragment_sent_to_external_model_blocked_by_fingerprint(engi
 
 
 def test_11b_model_outside_allowed_models_counts_as_external(engine):
-    v = engine.check_input(SALES, "Podsumuj cennik", model="google/gemma-4-26b-a4b-it:free")
+    v = engine.check_input(SALES, "Podsumuj cennik", model="google/gemma-4-26b-a4b-it")
     assert v.decision == "block" and v.details["destination"] == "external_llm"
     assert engine.check_input(SALES, "Podsumuj cennik", model="gemma4:12b").decision == "pass"
 

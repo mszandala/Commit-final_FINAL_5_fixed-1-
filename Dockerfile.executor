@@ -1,0 +1,10 @@
+FROM python:3.11-slim
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY backend/executor.py /app/executor.py
+COPY backend/security/code_guard.py /app/security/code_guard.py
+COPY backend/security/common/verdicts.py /app/security/common/verdicts.py
+RUN install -d -o 10001 -g 10001 -m 0700 /run/bank-executor \
+    && install -o 10001 -g 10001 /dev/null /run/bank-executor/.keep
+USER 10001:10001
+CMD ["python", "-m", "executor", "--socket", "/run/bank-executor/executor.sock"]

@@ -33,7 +33,7 @@ def new_history() -> list:
 
 
 def run_agent(user_message: str, history: Optional[list] = None,
-    tool_gate: Optional[ToolGate] = None, max_depth: int = 0) -> tuple[str, list]:
+    tool_gate: Optional[ToolGate] = None, max_depth: int = 0, tools: Optional[list] = None) -> tuple[str, list]:
     """Odpowiada na jedną wiadomość użytkownika.
 
     Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
@@ -46,7 +46,7 @@ def run_agent(user_message: str, history: Optional[list] = None,
     max_depth_token = _max_agent_depth.set(max_depth)
     try:
         for step in range(MAX_TOOL_STEPS):
-            msg = llm_client.chat(messages, tools=TOOLS)
+            msg = llm_client.chat(messages, tools=TOOLS if tools is None else tools)
 
             if not msg.tool_calls:
                 messages.append({"role": "assistant", "content": msg.content})
