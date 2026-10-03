@@ -1,30 +1,9 @@
-import json
 import re
-from pathlib import Path
 from typing import Optional
 
 from config import RESOURCE_TOOLS, ROLES
-from security.verdicts import Verdict
-
-ROLE_ALIASES = {
-    "basic_user": "podstawowy użytkownik",
-    "user": "podstawowy użytkownik",
-    "guest": "podstawowy użytkownik",
-    "podstawowy użytkownik": "podstawowy użytkownik",
-    "hr": "kadry",
-    "kadry": "kadry",
-    "admin": "administrator",
-    "administrator": "administrator",
-    "banker": "bankier",
-    "it": "IT",
-    "analyst": "analityk",
-    "analityk": "analityk",
-    "lawyer": "prawnik",
-    "prawnik": "prawnik",
-    "portfolio_manager": "Portfolio Manager",
-    "pm": "Portfolio Manager",
-    "Portfolio Manager": "Portfolio Manager",
-}
+from security.common.roles import normalize_role
+from security.common.verdicts import Verdict
 
 # Wzorce znanych ataków (Jailbreak / Prompt Injection)
 INJECTION_PATTERNS = [
@@ -67,16 +46,13 @@ RESOURCE_LABELS = {
 }
 
 
-def normalize_role(role: str) -> str:
-    """Normalizuje nazwę roli do formatu z config.ROLES."""
-    clean = (role or "").strip().lower()
-    return ROLE_ALIASES.get(clean, role)
+_INJECTION_REGEXES = [(re.compile(p, re.IGNORECASE), d) for p, d in INJECTION_PATTERNS]
 
 
 def _check_heuristic_injections(text: str) -> Optional[str]:
     """Szybka detekcja wzorców injection/jailbreak za pomocą regex."""
-    for pattern, description in INJECTION_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
+    for pattern, description in _INJECTION_REGEXES:
+        if pattern.search(text):
             return description
     return None
 
@@ -89,7 +65,7 @@ def _check_role_resource_access(canonical_role: str, text: str) -> Optional[tupl
     for resource, keywords in RESOURCE_KEYWORDS.items():
         if not any(k in text_lower for k in keywords):
             continue
-        if not allowed_tools & set(RESOURCE_TOOLS[resource]):
+        if allowed_tools.isdisjoint(RESOURCE_TOOLS[resource]):
             return resource, f"Rola '{canonical_role}' nie ma dostępu do {RESOURCE_LABELS[resource]}."
     return None
 

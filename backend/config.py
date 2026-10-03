@@ -26,6 +26,10 @@ PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
 BASE_DIR       = Path(__file__).parent / "data"
 CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
+
+# Dane modułu company_policies. Celowo poza CONTEXT_FOLDERS: agent nie czyta ich narzędziami plikowymi.
+COMPANY_DOCUMENTS_DIR = BASE_DIR / "company_documents"  # regulaminy, NDA, polityki (.md ze znacznikami control:)
+COMPANY_FIXTURES_DIR  = BASE_DIR / "company_fixtures"   # poufne materiały do fingerprintingu
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
 

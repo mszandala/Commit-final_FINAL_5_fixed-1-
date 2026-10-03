@@ -1,4 +1,5 @@
-from security.prompt_guard import check_prompt, normalize_role
+from security.common.roles import normalize_role
+from security.prompt_guard import check_prompt
 
 
 def test_role_normalization():

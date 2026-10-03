@@ -1,6 +1,6 @@
-from security.gliner_detector import detect_gliner_pii
-from security.pii_detector import detect_pii
-from security.regex_detector import detect_regex_pii
+from security.pii.gliner_detector import detect_gliner_pii
+from security.pii.pii_detector import detect_pii
+from security.pii.regex_detector import detect_regex_pii
 
 PHONE = "+48 600 700 800"
 

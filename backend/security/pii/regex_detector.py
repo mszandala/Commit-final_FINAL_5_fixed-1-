@@ -1,12 +1,15 @@
 import re
 
+from security.common.spans import by_position
+
 # Wzorce regex dla danych deterministycznych (hasła, sekrety, numery telefonów, e-maile)
 PASSWORD_PATTERN = re.compile(
     r'(?:password|pwd|secret|api[_-]?key|token)\s*[:=is\s]+(\S+)',
     re.IGNORECASE,
 )
 PHONE_PATTERN = re.compile(r'(\+?\d[\d\s\-\(\)]{7,}\d)')
-EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+# Grupa 1 = domena; z tego samego wzorca company_policies sprawdza, czy adres jest wewnętrzny.
+EMAIL_PATTERN = re.compile(r'[\w.+-]+@([\w-]+(?:\.[\w-]+)+)')
 
 
 def detect_regex_pii(text: str) -> list[dict]:
@@ -48,5 +51,5 @@ def detect_regex_pii(text: str) -> list[dict]:
             "end": m.end(),
         })
 
-    entities.sort(key=lambda e: (e["start"], -(e["end"] - e["start"])))
+    entities.sort(key=by_position)
     return entities
