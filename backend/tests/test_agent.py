@@ -26,7 +26,8 @@ def fake_llm(monkeypatch):
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_files, "BASE_DIR", tmp_path)
-    (tmp_path / "faq.txt").write_text("pierwsza\ndruga\n", encoding="utf-8")
+    (tmp_path / "bank_data").mkdir()
+    (tmp_path / "bank_data" / "faq.txt").write_text("pierwsza\ndruga\n", encoding="utf-8")
     return tmp_path
 
 

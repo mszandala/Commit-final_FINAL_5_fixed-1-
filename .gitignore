@@ -1,6 +1,5 @@
 __pycache__/
 .pytest_cache/
-<<<<<<< HEAD
 venv/
 .venv/
 __pychache__/
@@ -9,3 +8,4 @@ __pychache__/
 pyvenv.cfg
 backend/data/vector_db/
 
+backend/audit/events.jsonl

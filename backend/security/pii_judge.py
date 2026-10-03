@@ -1,0 +1,43 @@
+import json
+import re
+from pathlib import Path
+
+from audit import logger as audit
+from chatbot import llm_client
+from config import ROLES
+
+_PROMPT = (Path(__file__).parent / "prompts" / "pii_judge.txt").read_text(encoding="utf-8")
+
+
+def judge_entities(role: str, prompt: str, entities: list[dict]) -> list[str]:
+    """Rozstrzyga dla każdej encji z promptu: "send" (chatbot zobaczy wartość) albo "mask".
+
+    Sędzia działa w strefie bezpieczeństwa i widzi dane surowe. Każda wątpliwość — błąd wywołania,
+    nieczytelna odpowiedź, brak decyzji dla encji — kończy się maskowaniem.
+    """
+    if not entities:
+        return []
+    listing = "\n".join(f'{i}. {e["type"]}: "{e["text"]}"' for i, e in enumerate(entities, 1))
+    message = _PROMPT.format(
+        role=role,
+        role_description=ROLES.get(role, {}).get("description", ""),
+        prompt=prompt,
+        entities=listing,
+    )
+    decisions = ["mask"] * len(entities)
+    try:
+        reply = llm_client.chat([{"role": "user", "content": message}], zone="security", purpose="pii_judge")
+        match = re.search(r"\{.*\}", reply.content or "", re.DOTALL)
+        parsed = json.loads(match.group(0)) if match else {}
+        for i in range(len(entities)):
+            if str(parsed.get(str(i + 1), "")).strip().lower() == "send":
+                decisions[i] = "send"
+        error = None
+    except Exception as exc:
+        error = type(exc).__name__
+    audit.record(
+        "pii_judge", "security",
+        decisions=[{"type": e["type"], "decision": d} for e, d in zip(entities, decisions)],
+        error=error,
+    )
+    return decisions
