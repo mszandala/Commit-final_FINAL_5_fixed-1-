@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Settings } from 'lucide-react'
+import { ArrowLeft, Settings } from 'lucide-react'
 import cat from '../assets/cat.jpg'
 import Logs from './Logs'
 
@@ -8,7 +8,7 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
 ]
 
-export default function Dashboard() {
+export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
   const [tab, setTab] = useState('dashboard')
 
   return (
@@ -19,10 +19,10 @@ export default function Dashboard() {
             <button
               key={t.id}
               role="tab"
-              aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
+              aria-selected={!configOpen && tab === t.id}
+              onClick={() => (configOpen ? onLeaveConfig(() => setTab(t.id)) : setTab(t.id))}
               className={`-mb-px border-b-2 text-sm ${
-                tab === t.id ? 'border-navy text-navy' : 'border-transparent text-grey hover:text-ink'
+                !configOpen && tab === t.id ? 'border-navy text-navy' : 'border-transparent text-grey hover:text-ink'
               }`}
             >
               {t.label}
@@ -30,22 +30,19 @@ export default function Dashboard() {
           ))}
         </nav>
         <button
-          role="tab"
-          aria-selected={tab === 'config'}
-          aria-label="Config"
-          onClick={() => setTab('config')}
-          className={`my-auto ml-auto grid size-8 place-items-center rounded-md hover:bg-page ${
-            tab === 'config' ? 'text-navy' : 'text-grey hover:text-ink'
+          aria-label={configOpen ? 'Back' : 'Config'}
+          aria-pressed={configOpen}
+          onClick={() => (configOpen ? onLeaveConfig() : onOpenConfig())}
+          className={`my-auto ml-auto grid size-8 place-items-center rounded-md ${
+            configOpen ? 'bg-navy text-white' : 'text-grey hover:bg-page hover:text-ink'
           }`}
         >
-          <Settings size={18} />
+          {configOpen ? <ArrowLeft size={18} /> : <Settings size={18} />}
         </button>
       </header>
       <div role="tabpanel" className="min-h-0 flex-1">
         {tab === 'logs' ? (
           <Logs />
-        ) : tab === 'config' ? (
-          <div className="h-full" />
         ) : (
           <div className="grid h-full place-items-center p-6">
             <img src={cat} alt="Cat" className="w-[480px]" />
