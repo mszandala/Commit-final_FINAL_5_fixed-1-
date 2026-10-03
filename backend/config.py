@@ -87,13 +87,14 @@ PII_SENSITIVITY_LEVELS = [
 
 # Etapy kontroli (pole `stage` werdyktów i zdarzeń) i ich nazwy dla ludzi.
 CONTROLS = {
+    "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
     "tool_whitelist": "Tool permissions",
     "pii_policy":     "PII policy",
     "code_guard":     "Code guard",
     "company_policies": "Company policy",
     "chatbot_refusal": "Chatbot refusal",
-    "budget":         "Token budget",
+    "budget":         "Budget",
 }
 
 BASE_DIR       = Path(__file__).parent / "data"
@@ -106,6 +107,14 @@ MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
 # Limit wydatków na rolę w dolarach (łącznie, bez dziennego zerowania) i baza, w której są zapisywane.
 MAX_SPENDING = 0.5
+# Najdłuższy prompt użytkownika (w znakach); dłuższy jest odrzucany przed jakimkolwiek wywołaniem modelu.
+MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", "4000"))
+# Limity jednej tury w strefie chatbota (model, wywołania narzędzi, subagent). Po ich przekroczeniu
+# bramka odrzuca kolejne wywołania narzędzi, a model ma odpowiedzieć z tego, co już ma.
+MAX_TURN_TOKENS = int(os.getenv("MAX_TURN_TOKENS", "40000"))
+MAX_TURN_COST = float(os.getenv("MAX_TURN_COST", "0.05"))
+# Najdłuższy wynik narzędzia (w znakach) przekazywany modelowi; dłuższy jest przycinany.
+MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "24000"))
 SPENDING_DB = Path(__file__).parent / "spending.db"
 
 # Moduł regulaminów firmowych (security/company_policies) w przebiegu tury.

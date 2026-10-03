@@ -549,3 +549,59 @@ def test_refusal_falls_back_to_keywords_when_judge_fails(llm, env, monkeypatch):
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Zrób to")
     assert result.verdict["decision"] == "refuse"
     assert next(e for e in result.events if e["type"] == "refusal")["method"] == "keywords"
+
+
+# --- długość promptu i koszt wywołań ------------------------------------------------------------
+
+def _usage(llm, monkeypatch, tokens, cost):
+    """Każde wywołanie chatbota zgłasza do audytu podane zużycie, jak prawdziwy klient modelu."""
+    plain = llm_client.chat
+
+    def chat(messages, tools=None, provider=None, model=None, zone="chatbot", purpose="chat"):
+        audit_logger.record("llm_call", zone, purpose=purpose, tokens=tokens, cost=cost)
+        return plain(messages, tools, provider, model, zone, purpose)
+
+    monkeypatch.setattr(llm_client, "chat", chat)
+
+
+def test_too_long_prompt_is_blocked_before_any_model_call(llm, env, monkeypatch):
+    monkeypatch.setattr(pipeline, "MAX_PROMPT_CHARS", 100)
+    result = pipeline.run_turn(pipeline.Conversation("kadry"), f"Napisz do {EMAIL} " + "x" * 400)
+    assert result.blocked and result.verdict["stage"] == "prompt_length"
+    assert "limit to 100" in result.verdict["reason"]
+    assert llm.chatbot == [] and llm.security == []
+    assert EMAIL not in result.masked_prompt and "znaków pominięto" in result.masked_prompt
+    assert [e["type"] for e in result.events] == ["prompt_length", "turn"]
+
+
+def test_tool_calls_report_their_cost_and_long_results_are_cut(llm, env, monkeypatch):
+    monkeypatch.setattr(pipeline, "MAX_TOOL_RESULT_CHARS", 40)
+    llm.queue = [_reply(tool_calls=[_tool_call("read_client_records")]), _reply("gotowe")]
+    result = pipeline.run_turn(pipeline.Conversation("bankier"), "Pokaż klientów")
+    call = result.tool_calls[0]
+    assert call["tokens"] == 0 and call["cost"] == 0 and call["result_tokens"] > 10
+    event = next(e for e in result.events if e["type"] == "tool_call")
+    assert event["truncated_chars"] > 0 and event["result_tokens"] == call["result_tokens"]
+    tool_message = next(m for m in llm.chatbot[-1] if m.get("role") == "tool")
+    assert "[truncated:" in tool_message["content"]
+
+
+def test_turn_cost_limit_stops_further_tool_calls(llm, env, monkeypatch):
+    _usage(llm, monkeypatch, tokens=600, cost=0.001)
+    monkeypatch.setattr(pipeline, "MAX_TURN_TOKENS", 1000)
+    llm.queue = [_reply(tool_calls=[_tool_call("list_projects")]),      # 600 tokenów: jeszcze wolno
+                 _reply(tool_calls=[_tool_call("list_projects")]),      # 1200: bramka odmawia
+                 _reply("Tyle udało się ustalić.")]
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Wypisz projekty")
+    assert [c["allowed"] for c in result.tool_calls] == [True, False]
+    assert result.tool_calls[1]["stage"] == "budget" and "limit to 1000" in result.tool_calls[1]["reason"]
+    assert any(v["stage"] == "budget" and v["decision"] == "warn" for v in result.verdicts)
+    assert not result.blocked and result.reply == "Tyle udało się ustalić."
+
+
+def test_remaining_role_budget_narrows_the_turn_limit(llm, env, monkeypatch):
+    _usage(llm, monkeypatch, tokens=600, cost=0.02)
+    llm.queue = [_reply(tool_calls=[_tool_call("list_projects")]), _reply("Brak środków.")]
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Wypisz projekty",
+                               limits={"tokens": 50_000, "cost": 0.01})
+    assert result.tool_calls[0]["stage"] == "budget" and "$0.0100" in result.tool_calls[0]["reason"]

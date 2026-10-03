@@ -116,7 +116,9 @@ def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_pro
                                     tokens=0, cost=0, latency_ms=0, budget=_budget(name))
 
     with session.lock:
-        result = pipeline.run_turn(conv, request.message, on_progress=on_progress)
+        left = {"tokens": state.budget.token_limit(name) - state.budget.tokens_used(name),
+                "cost": MAX_SPENDING - state.budget.spent(name)}
+        result = pipeline.run_turn(conv, request.message, on_progress=on_progress, limits=left)
     state.budget.add(name, result.tokens, result.cost, SETTINGS.model)
     event = state.add_event(name, conv.id, result.verdict, result)
     if result.error:

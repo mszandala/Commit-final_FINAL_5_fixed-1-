@@ -25,8 +25,12 @@ class ToolCall(ApiModel):
     tool: str
     args: dict[str, Any] = Field(description="Argumenty w postaci, w jakiej wysłał je model (zamaskowane)")
     allowed: bool
-    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist albo code_guard")
+    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist, code_guard, "
+                                                   "company_policies albo budget")
     reason: Optional[str] = None
+    tokens: Optional[int] = Field(None, description="Tokeny zużyte w trakcie wywołania (np. przez subagenta)")
+    cost: Optional[float] = Field(None, description="Koszt wywołania w dolarach")
+    result_tokens: Optional[int] = Field(None, description="Szacunek, ile tokenów wynik dokłada do kontekstu modelu")
 
 
 class Budget(ApiModel):

@@ -14,6 +14,7 @@ LEVELS = ["info", "warn", "block"]
 
 # Rodzaje kroków (pole `kind`) i ich nazwy dla ludzi.
 STEP_KINDS = {
+    "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
     "intent":         "Intent check",
     "company_policy": "Company policy",
@@ -125,11 +126,17 @@ def _tool_call(e: dict) -> tuple[str, str]:
         control = CONTROLS.get(e.get("stage"), e.get("stage") or "security layer")
         reason = f": {e['reason']}" if e.get("reason") else ""
         return "block", f"{call} rejected by {control}{reason}"
+    # Koszt wywołania: wynik dokładany do kontekstu modelu i to, co narzędzie samo zużyło (subagent).
+    size = f"; result about {e['result_tokens']} tokens" if e.get("result_tokens") is not None else ""
+    if e.get("tokens"):
+        size += f", the call itself used {e['tokens']} tokens (${e.get('cost', 0):.4f})"
+    if e.get("truncated_chars"):
+        size += f", cut by {e['truncated_chars']} characters"
     stats = {k: v for k, v in (e.get("masked") or {}).items() if v}
     if stats:
         hidden = ", ".join(f"{v} {k}" for k, v in stats.items())
-        return "warn", f"{call} ran; before reaching the model: {hidden}"
-    return "info", f"{call} ran; nothing to hide in the result"
+        return "warn", f"{call} ran; before reaching the model: {hidden}{size}"
+    return ("warn" if e.get("truncated_chars") else "info"), f"{call} ran; nothing to hide in the result{size}"
 
 
 def _output_filter(e: dict) -> tuple[str, str]:
@@ -163,6 +170,7 @@ def _refusal(e: dict) -> tuple[str, str]:
 
 
 _DESCRIBE = {
+    "prompt_length": lambda e: ("block", f"Prompt has {e.get('chars')} characters; the limit is {e.get('limit')}"),
     "prompt_guard": _prompt_guard,
     "intent": _intent,
     "company_policy": _company_policy,

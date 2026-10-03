@@ -26,6 +26,10 @@ from config import (
     COLUMN_TYPES,
     DEFAULT_TOOL_RESULT_SCAN,
     INTENT_CLASSIFIER_ENABLED,
+    MAX_PROMPT_CHARS,
+    MAX_TOOL_RESULT_CHARS,
+    MAX_TURN_COST,
+    MAX_TURN_TOKENS,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
     REFUSAL_DETECTION_ENABLED,
@@ -181,7 +185,9 @@ class TurnResult:
     guard: Verdict
     masked_prompt: str              # to, co dostał chatbot
     prompt_entities: list           # encje z promptu + "decision": send / mask / block
-    tool_calls: list                # {"tool", "args", "allowed"}; argumenty w postaci zamaskowanej
+    # {"tool", "args", "allowed"} oraz dla wykonanych: "tokens", "cost" (zużycie w trakcie wywołania,
+    # np. subagenta) i "result_tokens" (szacunek tego, ile wynik dokłada do kontekstu modelu)
+    tool_calls: list
     output: dict                    # {"entities", "restored", "redacted", "blocked", "exempt"}
     leaks_to_chatbot: int           # ile wartości z sejfu znaleziono w wiadomościach do chatbota
     events: list                    # zdarzenia audytu tej tury (bez surowych wartości)
@@ -293,11 +299,30 @@ class SecureToolGate:
     """
 
     def __init__(self, conv: Conversation, threshold: Optional[float] = None,
-                 on_progress: Optional[Progress] = None):
+                 on_progress: Optional[Progress] = None, events: Optional[list] = None,
+                 limits: Optional[dict] = None):
         self.conv = conv
         self.threshold = threshold
         self.whitelist = ToolGate(conv.role)
         self.on_progress = on_progress
+        self.events = events if events is not None else []
+        # Limit tury to mniejsza z wartości: stały limit jednej tury i to, co zostało roli w budżecie.
+        limits = limits or {}
+        self.token_limit = min(MAX_TURN_TOKENS, limits.get("tokens", MAX_TURN_TOKENS))
+        self.cost_limit = min(MAX_TURN_COST, limits.get("cost", MAX_TURN_COST))
+
+    def spent(self) -> tuple[int, float]:
+        """Tokeny i koszt strefy chatbota od początku tury (model, subagent)."""
+        calls = [e for e in self.events if e["type"] == "llm_call" and e["zone"] == "chatbot"]
+        return sum(e.get("tokens", 0) for e in calls), sum(e.get("cost", 0) for e in calls)
+
+    def _over_limit(self) -> Optional[str]:
+        tokens, cost = self.spent()
+        if tokens >= self.token_limit:
+            return f"Tura zużyła {tokens} tokenów; limit to {self.token_limit}"
+        if cost >= self.cost_limit:
+            return f"Tura kosztowała ${cost:.4f}; limit to ${self.cost_limit:.4f}"
+        return None
 
     def _report(self, call: dict) -> None:
         if self.on_progress:
@@ -317,6 +342,15 @@ class SecureToolGate:
                          reason=call.get("reason"))
             self._report(call)
             return refusal
+
+        # Zbyt droga tura: kolejne narzędzia nie ruszają, model ma odpowiedzieć z tego, co już zebrał.
+        over = self._over_limit()
+        if over:
+            call.update(allowed=False, stage="budget", reason=over)
+            audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage="budget", reason=over)
+            self._report(call)
+            return ("Tool call refused: the cost limit for this request is used up. Do not call any more tools. "
+                    "Answer with what you already have and tell the user the request was too large to finish.")
 
         # Kod do uruchomienia sprawdzamy tu, żeby odrzucenie było widoczne jako decyzja warstwy
         # bezpieczeństwa, a nie tylko jako tekst błędu narzędzia.
@@ -345,7 +379,9 @@ class SecureToolGate:
                                             f"Access denied by company policy: {verdict.reason} Do not call this "
                                             "tool again with this data. Tell the user the request is not allowed.")
 
+        tokens_before, cost_before = self.spent()
         result = masking.sanitize_paths(run_tool(name, real_args))
+        tokens_after, cost_after = self.spent()
         if engine and local:
             verdict, softened = _soften(engine, self.conv.role, result,
                                         engine.filter_context(self.conv.role, result, source=name),
@@ -356,12 +392,20 @@ class SecureToolGate:
                                             f"Tool result withheld by company policy: {verdict.reason}")
             result = verdict.details.get("redacted_text") or result
         masked, scan, stats = self._mask_result(name, result)
+        cut = max(0, len(masked) - MAX_TOOL_RESULT_CHARS)
+        if cut:
+            masked = (masked[:MAX_TOOL_RESULT_CHARS]
+                      + f"\n[truncated: {cut} more characters; narrow the request to see the rest]")
         if name in PUBLIC_SOURCE_TOOLS:
             self.conv.public_texts.append(masked)
         else:
             self.conv.private_context = True
+        # Koszt wywołania: zużycie w jego trakcie (subagent) i to, ile wynik dokłada do kontekstu modelu.
+        call.update(tokens=tokens_after - tokens_before, cost=cost_after - cost_before,
+                    result_tokens=-(-len(masked) // CHARS_PER_TOKEN))
         audit.record("tool_call", "local" if local else "chatbot", tool=name, allowed=True, args=args,
-                     scan=scan, masked=stats, result_chars=len(masked))
+                     scan=scan, masked=stats, result_chars=len(masked), truncated_chars=cut,
+                     tokens=call["tokens"], cost=call["cost"], result_tokens=call["result_tokens"])
         self._report(call)
         return masked
 
@@ -468,6 +512,10 @@ _RETRY_MESSAGE = ("Your previous message contained a tool call written as plain 
                   "If you need a tool, call it through the tool interface; otherwise answer in plain text.")
 
 
+CHARS_PER_TOKEN = 4             # zgrubny przelicznik znaków na tokeny, jak w security/budget.py
+LOGGED_EXCERPT_CHARS = 300      # tyle z odrzuconego, zbyt długiego promptu trafia do logu
+
+
 def hide_tool_names(text: str) -> tuple[str, int]:
     """Zamienia nazwy wewnętrznych narzędzi w odpowiedzi na neutralny znacznik. Zwraca (tekst, ile zamian)."""
     return _TOOL_NAMES.subn(TOOL_PLACEHOLDER, text)
@@ -493,17 +541,19 @@ def _clean(reason: str) -> str:
 
 
 def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] = None,
-             on_progress: Optional[Progress] = None) -> TurnResult:
+             on_progress: Optional[Progress] = None, limits: Optional[dict] = None) -> TurnResult:
     """Przeprowadza jedną wiadomość użytkownika przez całą warstwę bezpieczeństwa.
 
     `on_progress(rodzaj, dane)` dostaje kolejne etapy ("stage") i wywołania narzędzi ("tool").
+    `limits` to pozostały budżet roli: {"tokens", "cost"}; zawęża limity jednej tury.
     """
     started = time.perf_counter()
     events = audit.start_turn()
     conv.turns += 1
     if threshold is None:
         threshold = SETTINGS.pii_threshold
-    gate = SecureToolGate(conv, threshold, on_progress)
+    gate = SecureToolGate(conv, threshold, on_progress, events, limits)
+    guard, flagged, guard_reason = None, False, None
     output = {"entities": [], "restored": [], "redacted": [], "blocked": [], "exempt": [], "found": []}
     leaks = 0
     refusal = None      # werdykt odmowy chatbota, jeśli ją wykryto
@@ -532,6 +582,10 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         verdicts = [verdict] if verdict else []
         if flagged and not (verdict and verdict["stage"] == "prompt_guard"):
             verdicts.append({"decision": "warn", "stage": "prompt_guard", "reason": guard_reason})
+        stopped = next((c for c in gate.calls if c.get("stage") == "budget"), None)
+        if stopped:
+            verdicts.append({"decision": "warn", "stage": "budget",
+                             "reason": f"Przerwano wywołania narzędzi: {stopped['reason']}"})
         if refusal and refusal is not verdict:
             verdicts.append(refusal)
         masked = sorted({e["type"] for e in entities if e.get("decision") == "mask"})
@@ -541,6 +595,14 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
 
     def block(stage_name, reason):
         return {"decision": "block", "stage": stage_name, "reason": reason}
+
+    # 0. Długość promptu: zbyt długi nie trafia do żadnego modelu, także do strażników.
+    if len(user_message) > MAX_PROMPT_CHARS:
+        reason = f"Zapytanie ma {len(user_message)} znaków; limit to {MAX_PROMPT_CHARS}"
+        audit.record("prompt_length", "security", chars=len(user_message), limit=MAX_PROMPT_CHARS)
+        excerpt = _logged_prompt(user_message[:LOGGED_EXCERPT_CHARS], threshold)
+        return finish(f"Zapytanie zostało zablokowane: {reason}", block("prompt_length", reason),
+                      f"{excerpt} [... {len(user_message) - LOGGED_EXCERPT_CHARS} znaków pominięto]")
 
     # 1. Strażnik promptu (strefa bezpieczeństwa, dane surowe): wzorce regex jako pierwszy sygnał, potem
     #    klasyfikator intencji. Gdy klasyfikator działa, to on rozstrzyga — słowa kluczowe same już tylko

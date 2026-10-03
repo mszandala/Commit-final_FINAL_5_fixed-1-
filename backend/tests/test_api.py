@@ -83,7 +83,7 @@ def test_meta_and_roles():
                                                      "earnings", "code", "subagents"]
     assert meta["piiTags"] == ["NAME", "SALARY", "PESEL"]
     assert meta["redactedPii"] == ["EMAIL", "PHONE-NO"] and meta["blockedPii"] == ["PASSWORD", "CREDIT-CARD-NO"]
-    assert set(meta["controls"]) == {"prompt_guard", "tool_whitelist", "pii_policy", "code_guard",
+    assert set(meta["controls"]) == {"prompt_length", "prompt_guard", "tool_whitelist", "pii_policy", "code_guard",
                                      "company_policies", "chatbot_refusal", "budget"}
 
     roles = {r["id"]: r for r in client.get(f"{API}/roles").json()}
@@ -98,7 +98,7 @@ def test_chat_reply_tools_tokens_and_event(llm):
     body = _chat("basic_user", "Co to za projekt alpha?").json()
     assert body["text"] == "To projekt alpha." and body["verdict"] is None
     assert body["tools"] == [{"tool": "read_project", "args": {"name": "alpha"}, "allowed": True,
-                              "stage": None, "reason": None}]
+                              "stage": None, "reason": None, "tokens": 0, "cost": 0.0, "resultTokens": 4}]
     assert body["tokens"] == 200 and body["cost"] == 0.02
     assert body["budget"] == {"limit": 20000, "used": 200, "spendingLimit": 0.5, "spent": 0.02}
 
@@ -163,7 +163,7 @@ def test_budget_blocks_when_exhausted(llm, monkeypatch):
     assert _chat("basic_user", "Drugie pytanie").json()["budget"]["used"] == 200
     body = _chat("basic_user", "Trzecie pytanie").json()
     assert body["text"] is None and body["verdict"]["stage"] == "budget"
-    assert client.get(f"{API}/events").json()[2]["control"] == "Token budget"
+    assert client.get(f"{API}/events").json()[2]["control"] == "Budget"
 
 
 def test_conversations(llm):
