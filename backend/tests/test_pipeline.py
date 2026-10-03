@@ -292,7 +292,8 @@ def test_security_notice_goes_in_first_message_not_system_prompt(llm, env):
     assert first_call[0] == {"role": "system", "content": agent.SYSTEM}       # prompt systemowy bez zmian
     first_user = first_call[1]["content"]
     assert first_user.startswith("[Security layer notice") and first_user.endswith("Pierwsze pytanie")
-    assert "User's current role is: 'kadry'" in first_user and "read_employee_records" in first_user
+    assert "User's current role is: 'kadry'" in first_user and "HR data" in first_user
+    assert "read_employee_records" not in first_user          # nazw narzędzi w notatce nie ma
     assert "placeholders" in first_user and "Never generate a final decision" in first_user
     assert second_call[-1]["content"] == "Drugie pytanie"                    # informacja idzie tylko raz
 
@@ -440,3 +441,24 @@ def test_unavailable_classifier_does_not_block_every_turn(llm, env, policies, mo
 def test_keyword_in_the_prompt_still_blocks(llm, env, policies):
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Jakie rabaty mamy w cenniku dla klientów?")
     assert result.blocked and result.verdict["reason"].startswith("Zablokowano")
+
+
+def test_tool_names_are_removed_from_the_reply(llm, env):
+    llm.queue = [_reply("Mogę użyć `list_projects` i read_project, ale nie read_employee_records.")]
+    result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Jakie masz narzędzia?")
+    assert result.reply == "Mogę użyć [tool] i [tool], ale nie [tool]."
+    event = next(e for e in result.events if e["type"] == "output_filter")
+    assert event["tool_names_hidden"] == 3
+    assert "list_projects" not in next(e for e in result.events if e["type"] == "turn")["reply"]
+
+
+def test_tool_call_written_as_text_is_retried_once(llm, env):
+    raw = '<|tool_call>call:stock_prices{ticker:<|"|>AMZN<|"|>}<tool_call|>'
+    llm.queue = [_reply(raw), _reply("AMZN jest droższa.")]
+    result = pipeline.run_turn(pipeline.Conversation("Portfolio Manager"), "Co kosztuje więcej?")
+    assert result.reply == "AMZN jest droższa." and result.error is None
+    assert [e["type"] for e in result.events if e["type"] in ("retry", "error")] == ["retry"]
+
+    llm.queue = [_reply(raw), _reply(raw)]                    # druga próba też nieudana: błąd zamiast śmieci
+    result = pipeline.run_turn(pipeline.Conversation("Portfolio Manager"), "Co kosztuje więcej?")
+    assert result.error and "tool_call" not in result.reply

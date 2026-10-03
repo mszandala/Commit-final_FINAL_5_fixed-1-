@@ -68,11 +68,11 @@ def test_gate_allows_whitelisted_and_records_violations():
     gate = ToolGate("kadry")
     assert gate("read_employee_records", {}) is None
     refusal = gate("read_client_records", {"column": "customer_id"})
-    assert "read_client_records" in refusal
     assert len(gate.violations) == 1
     assert gate.violations[0]["tool"] == "read_client_records" and gate.violations[0]["stage"] == "tool_whitelist"
-    assert "Authorized tools for this role are:" in refusal
-    assert "read_employee_records" in refusal
+    # odmowa mówi o obszarach danych, a nie o nazwach narzędzi — model ich potem nie powtarza
+    assert "Data areas available to this role: Projects, HR data" in refusal
+    assert "read_employee_records" not in refusal and "read_client_records" not in refusal
     assert len(gate.calls) == 2
 
 
@@ -85,5 +85,6 @@ def test_notice_includes_user_role():
     from pipeline import _notice
     prompt = _notice("kadry")
     assert "User's current role is: 'kadry'" in prompt
-    assert "read_employee_records" in prompt
-    assert "read_client_records" not in prompt
+    assert "Company data areas available to this role: Projects, HR data." in prompt
+    assert "read_employee_records" not in prompt and "Bank clients" not in prompt
+    assert "Reply in the language of the user's message" in prompt

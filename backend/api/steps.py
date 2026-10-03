@@ -21,6 +21,7 @@ STEP_KINDS = {
     "tool_call":      "Tool call",
     "output_filter":  "Reply filter",
     "refusal":        "Chatbot refusal",
+    "retry":          "Retry",
     "budget":         "Budget",
     "error":          "Error",
 }
@@ -129,7 +130,9 @@ def _output_filter(e: dict) -> tuple[str, str]:
         parts.append(f"restored for the user: {_counted(e['restored'])}")
     if e.get("exempt"):
         parts.append(f"public or typed by the user: {_counted(e['exempt'])}")
-    level = "warn" if e.get("redacted") or e.get("found") else "info"
+    if e.get("tool_names_hidden"):
+        parts.append(f"internal tool names removed: {e['tool_names_hidden']}")
+    level = "warn" if e.get("redacted") or e.get("found") or e.get("tool_names_hidden") else "info"
     text = "; ".join(parts)
     return level, (text[0].upper() + text[1:]) if text else "Nothing to hide in the reply"
 
@@ -150,6 +153,7 @@ _DESCRIBE = {
     "tool_call": _tool_call,
     "output_filter": _output_filter,
     "refusal": _refusal,
+    "retry": lambda e: ("warn", f"The model's reply was discarded and requested again: {e.get('reason')}"),
     "budget": lambda e: ("block", e.get("reason") or "Budget exhausted"),
     "error": lambda e: ("block", f"Model call failed: {e.get('error')}"),
 }
