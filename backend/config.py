@@ -25,6 +25,7 @@ PII_MODEL = os.getenv("PII_MODEL", "urchade/gliner_small-v2.1")
 PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
 BASE_DIR       = Path(__file__).parent / "data"
+CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
 
@@ -35,9 +36,9 @@ _GENERIC_TOOLS = ["list_files", "read_file"]
 ROLES = {
     "podstawowy użytkownik": {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
     "kadry":                 {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "administrator":         {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
+    "administrator":         {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python"], "allowed_pii": []},
     "bankier":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
-    "IT":                    {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
+    "IT":                    {"description": "", "allowed_tools": _GENERIC_TOOLS + ["run_python"], "allowed_pii": []},
     "analityk":              {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
     "prawnik":               {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
     "Portfolio Manager":     {"description": "", "allowed_tools": _GENERIC_TOOLS, "allowed_pii": []},
