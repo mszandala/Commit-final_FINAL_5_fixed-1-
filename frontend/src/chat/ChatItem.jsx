@@ -2,7 +2,6 @@ import { Ban, CloudOff, EyeOff, Flag, RotateCw } from 'lucide-react'
 import { useMeta } from '../meta'
 import Button from '../ui/Button'
 import Notice from '../ui/Notice'
-import Attachment from './Attachment'
 import Markdown from './Markdown'
 import Pending from './Pending'
 import ToolCall from './ToolCall'
@@ -32,13 +31,8 @@ export default function ChatItem({ item, onRetry }) {
 
   if (item.kind === 'user') {
     return (
-      <div className="flex flex-col items-end gap-1.5">
-        {item.files.map((file, i) => (
-          <Attachment key={`${file.name}-${i}`} file={file} />
-        ))}
-        {item.text && (
-          <p className="max-w-[85%] cursor-text whitespace-pre-wrap rounded-md bg-blue-light/35 px-3.5 py-2">{item.text}</p>
-        )}
+      <div className="flex flex-col items-end">
+        <p className="max-w-[85%] cursor-text whitespace-pre-wrap rounded-md bg-blue-light/35 px-3.5 py-2">{item.text}</p>
       </div>
     )
   }

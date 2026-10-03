@@ -238,8 +238,9 @@ function ShareBar({ parts }) {
 
 const timeOf = (d) => d.toLocaleTimeString('en-GB')
 
-const TH = 'border-b border-line px-1.5 pb-(--cell) text-[13px] font-normal text-grey'
+const TH = 'whitespace-nowrap border-b border-line px-1.5 pb-(--cell) text-[13px] font-normal text-grey'
 const TD = 'border-b border-line px-1.5 py-(--cell)'
+const NUM = `${TD} whitespace-nowrap text-right`
 
 export default function Overview({ onOpenLogs }) {
   const meta = useMeta()
@@ -265,7 +266,9 @@ export default function Overview({ onOpenLogs }) {
         {events.length === 0 ? (
           <p className="py-10 text-center text-grey">No turns yet</p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(22rem,1fr))] gap-(--gap)">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(max(22rem,calc((100%-var(--gap))/2)),1fr))] gap-(--gap)">
+            {/* Two columns, or one when two would be under 22rem each; never a third, which the
+                full-width panels would hold open as an empty slot beside the first row. */}
             <Panel
               title="Most triggered controls"
               aside={
@@ -328,9 +331,9 @@ export default function Overview({ onOpenLogs }) {
                               {purpose(p.id).label}
                             </span>
                           </td>
-                          <td className={`${TD} text-right`}>{formatNumber(p.calls)}</td>
-                          <td className={`${TD} text-right`}>{formatNumber(p.tokens)}</td>
-                          <td className={`${TD} text-right`}>{formatUsd(p.cost)}</td>
+                          <td className={`${NUM}`}>{formatNumber(p.calls)}</td>
+                          <td className={`${NUM}`}>{formatNumber(p.tokens)}</td>
+                          <td className={`${NUM}`}>{formatUsd(p.cost)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -379,9 +382,9 @@ export default function Overview({ onOpenLogs }) {
                               {group(t.id).label}
                             </span>
                           </td>
-                          <td className={`${TD} text-right`}>{formatNumber(t.total / events.length)} ms</td>
-                          <td className={`${TD} text-right`}>{formatNumber(t.slowest)} ms</td>
-                          <td className={`${TD} text-right`}>{percent(t.total, allTime)}</td>
+                          <td className={`${NUM}`}>{formatNumber(t.total / events.length)} ms</td>
+                          <td className={`${NUM}`}>{formatNumber(t.slowest)} ms</td>
+                          <td className={`${NUM}`}>{percent(t.total, allTime)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -458,14 +461,14 @@ export default function Overview({ onOpenLogs }) {
                           <span className="shrink-0 text-[13px] text-grey">{u.role}</span>
                         </button>
                       </td>
-                      <td className={`${TD} text-right`}>{formatNumber(u.turns)}</td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>{formatNumber(u.turns)}</td>
+                      <td className={`${NUM}`}>
                         <Count n={u.blocked} />
                       </td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>
                         <Count n={u.hidden} />
                       </td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>
                         <Count n={u.refused} />
                       </td>
                     </tr>

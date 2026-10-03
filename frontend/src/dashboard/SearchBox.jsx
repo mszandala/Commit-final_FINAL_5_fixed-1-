@@ -1,5 +1,5 @@
 import { useId, useRef } from 'react'
-import { Search, TextSearch } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { tokenize } from './search'
 
 const COLORS = {
@@ -67,6 +67,7 @@ export default function SearchBox({ value, onChange, advanced, onToggle, error }
           </span>
         )}
       </div>
+      {/* A short word in a thin frame, not an icon: a search icon beside the box read as "apply search". */}
       <button
         aria-pressed={advanced}
         aria-label="Advanced search"
@@ -75,11 +76,11 @@ export default function SearchBox({ value, onChange, advanced, onToggle, error }
           onToggle()
           input.current.focus()
         }}
-        className={`grid size-[34px] shrink-0 place-items-center rounded-md ${
-          advanced ? 'bg-navy text-white' : 'text-grey hover:bg-white hover:text-ink'
+        className={`h-[34px] shrink-0 rounded-md border px-2 text-[13px] ${
+          advanced ? 'border-navy bg-navy text-white' : 'border-line text-grey hover:bg-white hover:text-ink'
         }`}
       >
-        <TextSearch size={16} />
+        Adv.
       </button>
     </div>
   )

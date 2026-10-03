@@ -72,9 +72,8 @@ export default function Chat({ people }) {
     }
   }
 
-  function submit(text, files = []) {
-    const attached = files.map(({ name, size }) => ({ name, size }))
-    const added = [{ id: nextId++, kind: 'user', text, files: attached }]
+  function submit(text) {
+    const added = [{ id: nextId++, kind: 'user', text }]
     if (!sessionStarted) added.unshift({ id: nextId++, kind: 'session', name: person.user, role: person.label })
     setSessionStarted(true)
     setItems((prev) => [...prev, ...added])
@@ -104,7 +103,8 @@ export default function Chat({ people }) {
         />
       </header>
 
-      <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
+      {/* `wrap-break-word` is inherited, so a long unbroken word wraps in every message instead of overflowing. */}
+      <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5 wrap-break-word">
         {items.map((item) => (
           <ChatItem key={item.id} item={item} />
         ))}
