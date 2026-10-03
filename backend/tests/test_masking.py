@@ -61,7 +61,7 @@ def test_render_follows_role_policy():
     assert shown == f"{EMAIL} / 15647311" and stats["restored"] == ["EMAIL", "CLIENT-ID"]
 
     shown, stats = vault.render(text, {"EMAIL": "redact", "CLIENT-ID": "pseudonymize"})
-    assert shown == f"[UKRYTY EMAIL] / {client}" and stats["redacted"] == ["EMAIL"]
+    assert shown == f"[EMAIL] / {client}" and stats["redacted"] == ["EMAIL"]
 
     shown, stats = vault.render(text, {"EMAIL": "block", "CLIENT-ID": "allow"})
     assert stats["blocked"] == ["EMAIL"] and EMAIL not in shown

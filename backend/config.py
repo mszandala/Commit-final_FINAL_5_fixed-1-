@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -26,10 +27,9 @@ PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
 # Strefa bezpieczeństwa (strażnicy, sędziowie): widzi dane surowe i docelowo działa na lokalnej
 # infrastrukturze. Dziś idzie tym samym providerem co chatbot; zmiana to dwie zmienne w .env.
-SECURITY_PROVIDER = os.getenv("SECURITY_PROVIDER", "") or LLM_PROVIDER
-SECURITY_MODEL = os.getenv("SECURITY_MODEL", "") or (
-    OPENROUTER_MODEL if SECURITY_PROVIDER == "openrouter" else OLLAMA_MODEL
-)
+# Puste = strefa bezpieczeństwa używa bieżącego providera i modelu chatbota (SETTINGS).
+SECURITY_PROVIDER = os.getenv("SECURITY_PROVIDER", "")
+SECURITY_MODEL = os.getenv("SECURITY_MODEL", "")
 
 # Maskowanie danych wrażliwych w strefie chatbota (prompt, historia, wyniki narzędzi)
 MASKING_ENABLED = os.getenv("MASKING_ENABLED", "true").lower() == "true"
@@ -38,7 +38,58 @@ PII_JUDGE_ENABLED = os.getenv("PII_JUDGE_ENABLED", "true").lower() == "true"
 # Klucz HMAC do pseudonimizacji identyfikatorów; pusty = losowy na czas działania procesu
 PSEUDONYM_KEY = os.getenv("PSEUDONYM_KEY", "")
 
+# Tryb strażnika promptu: "warn" (ostrzega i przepuszcza) albo "block" (zatrzymuje zapytanie)
+PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "warn")
+
 AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
+
+
+@dataclass
+class Settings:
+    """Ustawienia zmienialne w trakcie działania (formularz konfiguracji w interfejsie).
+
+    Moduły czytają je w chwili użycia, więc zmiana przez API działa od następnej wiadomości.
+    Wartości startowe pochodzą z .env; po restarcie serwera wracają do nich.
+    """
+    provider: str             # "openrouter" | "ollama"
+    model: str
+    openrouter_api_key: str
+    pii_threshold: float
+    guard_mode: str           # "warn" | "block"
+    mask_pii: bool            # maskowanie w strefie chatbota i ukrywanie PII w odpowiedzi
+
+
+SETTINGS = Settings(
+    provider=LLM_PROVIDER,
+    model=MODEL,
+    openrouter_api_key=OPENROUTER_API_KEY,
+    pii_threshold=PII_THRESHOLD,
+    guard_mode=PROMPT_GUARD_MODE,
+    mask_pii=MASKING_ENABLED,
+)
+
+# Modele do wyboru w formularzu konfiguracji.
+MODEL_PRESETS = [
+    {"id": "google/gemma-4-26b-a4b-it",      "label": "Gemma 4 26B",            "provider": "openrouter"},
+    {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26B, free tier", "provider": "openrouter"},
+    {"id": "gemma4:12b",                     "label": "Gemma 4 12B",            "provider": "ollama"},
+]
+
+# Poziomy czułości detektora PII (próg GLiNER): im niższy próg, tym więcej wykryć.
+PII_SENSITIVITY_LEVELS = [
+    {"id": "low",      "label": "Low",      "threshold": 0.50},
+    {"id": "balanced", "label": "Balanced", "threshold": 0.35},
+    {"id": "high",     "label": "High",     "threshold": 0.20},
+]
+
+# Etapy kontroli (pole `stage` werdyktów i zdarzeń) i ich nazwy dla ludzi.
+CONTROLS = {
+    "prompt_guard":   "Prompt guard",
+    "tool_whitelist": "Tool permissions",
+    "pii_policy":     "PII policy",
+    "code_guard":     "Code guard",
+    "budget":         "Token budget",
+}
 
 BASE_DIR       = Path(__file__).parent / "data"
 CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
@@ -54,6 +105,19 @@ _CAMPAIGNS = ["read_bank_campaigns"]
 _MARKET    = ["read_stock_prices", "list_earnings_calls", "read_earnings_call"]
 _CODE      = ["run_python"]
 _SUBAGENT  = ["create_subagent"]
+
+# Obszary dostępu pokazywane w macierzy ról w interfejsie: id -> etykieta i narzędzia.
+# Narzędzia spoza tych obszarów (_GENERIC_TOOLS) nie są edytowalne z interfejsu.
+DATA_ACCESS = {
+    "projects":  {"label": "Projects",       "tools": _PROJECTS},
+    "hr":        {"label": "HR data",        "tools": _HR},
+    "clients":   {"label": "Bank clients",   "tools": _CLIENTS},
+    "campaigns": {"label": "Campaigns",      "tools": _CAMPAIGNS},
+    "stocks":    {"label": "Stock prices",   "tools": ["read_stock_prices"]},
+    "earnings":  {"label": "Earnings calls", "tools": ["list_earnings_calls", "read_earnings_call"]},
+    "code":      {"label": "Run code",       "tools": _CODE},
+    "subagents": {"label": "Subagents",      "tools": _SUBAGENT},
+}
 
 # Zasób danych → narzędzia, które go czytają. Z tego prompt_guard wylicza, czy rola ma dostęp
 # do zasobu, o który pyta użytkownik — zmiana allowed_tools od razu zmienia jego decyzje.
@@ -115,6 +179,21 @@ ROLES = {
         "allowed_pii": ["SALARY", "ORGANIZATION", "NAME", "LOCATION", "PROJECT"],
     },
 }
+
+# Tożsamość roli w API i interfejsie: id (alias akceptowany przez prompt_guard), etykieta,
+# przykładowy użytkownik i jego dzienny budżet tokenów.
+_ROLE_PROFILES = {
+    "podstawowy użytkownik": ("basic_user",        "Employee",          "Piotr Nowak",         20_000),
+    "kadry":                 ("hr",                "HR",                "Anna Wiśniewska",     50_000),
+    "bankier":               ("banker",            "Banker",            "Katarzyna Wójcik",    50_000),
+    "analityk":              ("analyst",           "Analyst",           "Michał Kamiński",    100_000),
+    "prawnik":               ("lawyer",            "Lawyer",            "Magdalena Kowalczyk", 50_000),
+    "Portfolio Manager":     ("portfolio_manager", "Portfolio manager", "Jakub Szymański",    100_000),
+    "IT":                    ("it",                "IT",                "Tomasz Lewandowski",  50_000),
+    "administrator":         ("admin",             "Admin",             "Marek Zieliński",    200_000),
+}
+for _name, (_id, _label, _user, _budget) in _ROLE_PROFILES.items():
+    ROLES[_name].update(id=_id, label=_label, user=_user, daily_token_budget=_budget)
 
 
 # --- Polityki danych wrażliwych -------------------------------------------------------------

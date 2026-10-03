@@ -8,14 +8,12 @@ from openai import OpenAI
 
 from audit import logger as audit
 from config import (
-    LLM_PROVIDER,
-    MODEL,
     OLLAMA_MODEL,
-    OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
     SECURITY_MODEL,
     SECURITY_PROVIDER,
+    SETTINGS,
 )
 
 
@@ -99,14 +97,14 @@ def _format_messages_for_openrouter(messages: list) -> list:
 
 def _chat_openrouter(messages: list, tools: Optional[list] = None, model: Optional[str] = None):
     """Wywołanie modelu przez OpenRouter."""
-    if not OPENROUTER_API_KEY:
+    if not SETTINGS.openrouter_api_key:
         raise ValueError(
             "Brak klucza OPENROUTER_API_KEY. Ustaw go w pliku .env lub jako zmienną środowiskową."
         )
 
     client = OpenAI(
         base_url=OPENROUTER_BASE_URL,
-        api_key=OPENROUTER_API_KEY,
+        api_key=SETTINGS.openrouter_api_key,
     )
 
     formatted_messages = _format_messages_for_openrouter(messages)
@@ -146,11 +144,12 @@ def _chat_openrouter(messages: list, tools: Optional[list] = None, model: Option
                 )
             )
 
+    usage = getattr(response, "usage", None)
     return SimpleNamespace(
         role="assistant",
         content=raw_msg.content or "",
         tool_calls=tool_calls,
-    )
+    ), int(getattr(usage, "total_tokens", 0) or 0)
 
 
 def _chat_ollama(messages: list, tools: Optional[list] = None, model: Optional[str] = None):
@@ -163,7 +162,8 @@ def _chat_ollama(messages: list, tools: Optional[list] = None, model: Optional[s
         params["tools"] = tools
 
     response = ollama.chat(**params)
-    return response.message
+    tokens = (getattr(response, "prompt_eval_count", 0) or 0) + (getattr(response, "eval_count", 0) or 0)
+    return response.message, int(tokens)
 
 
 def chat(
@@ -187,7 +187,10 @@ def chat(
     if zone == "security":
         provider = provider or SECURITY_PROVIDER
         model = model or SECURITY_MODEL
-    chosen_provider = (provider or LLM_PROVIDER).lower()
+    chosen_provider = (provider or SETTINGS.provider).lower()
+    # Model z ustawień dotyczy tylko providera z ustawień; dla innego bierzemy jego domyślny.
+    if not model and chosen_provider == SETTINGS.provider.lower():
+        model = SETTINGS.model
 
     if chosen_provider == "openrouter":
         call, used_model = _chat_openrouter, model or OPENROUTER_MODEL
@@ -198,6 +201,7 @@ def chat(
             f"Nieznany provider: {chosen_provider}. Dostępne opcje to 'openrouter' i 'ollama'."
         )
 
+    message, tokens = call(messages, tools=tools, model=used_model)
     audit.record("llm_call", zone, purpose=purpose, provider=chosen_provider, model=used_model,
-                 messages=len(messages))
-    return call(messages, tools=tools, model=model)
+                 messages=len(messages), tokens=tokens)
+    return message

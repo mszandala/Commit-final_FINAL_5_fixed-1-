@@ -25,21 +25,6 @@ MIN_KNOWN_VALUE_LEN = 6
 
 REDACTED_CELL = "[REDACTED]"
 
-LABELS = {
-    "PASSWORD":       "[UKRYTE HASŁO]",
-    "EMAIL":          "[UKRYTY EMAIL]",
-    "PHONE-NO":       "[UKRYTY TELEFON]",
-    "NAME":           "[UKRYTE IMIĘ I NAZWISKO]",
-    "SALARY":         "[UKRYTE WYNAGRODZENIE]",
-    "CREDIT-CARD-NO": "[UKRYTY NUMER KARTY]",
-    "ORGANIZATION":   "[UKRYTA ORGANIZACJA]",
-    "LOCATION":       "[UKRYTA LOKALIZACJA]",
-    "PROJECT":        "[UKRYTY PROJEKT]",
-    "CLIENT-ID":      "[UKRYTY ID KLIENTA]",
-    "ACCOUNT-NO":     "[UKRYTY NUMER RACHUNKU]",
-    "EMPLOYEE-ID":    "[UKRYTY ID PRACOWNIKA]",
-}
-
 # Znacznik w nawiasach dowolnego rodzaju, z tolerancją na to, co model potrafi z nim zrobić:
 # <EMAIL_1>, <email 1>, [EMAIL-1], &lt;EMAIL_1&gt;, <PHONE-NO_2>.
 _TOKEN_RE = re.compile(
@@ -49,7 +34,8 @@ _PSEUDONYM_RE = re.compile(r"\b(?:ID|id|Id)[-_]([0-9a-fA-F]{10})\b")
 
 
 def label_for(entity_type: str) -> str:
-    return LABELS.get(entity_type, f"[UKRYTE: {entity_type}]")
+    """Etykieta w miejscu ukrytej wartości — ten sam format co pii_policy.redact: [TYP]."""
+    return f"[{entity_type}]"
 
 
 _SEVERITY = ["allow", "pseudonymize", "redact", "block"]

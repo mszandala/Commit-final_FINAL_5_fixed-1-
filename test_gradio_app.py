@@ -12,8 +12,8 @@ if str(BACKEND_DIR) not in sys.path:
 import gradio as gr
 
 import pipeline
-from config import (LLM_PROVIDER, MASKING_ENABLED, MODEL, PII_JUDGE_ENABLED, PII_MODEL, ROLES,
-                    SECURITY_MODEL, SECURITY_PROVIDER)
+from config import (LLM_PROVIDER, MODEL, PII_JUDGE_ENABLED, PII_MODEL, ROLES, SECURITY_MODEL,
+                    SECURITY_PROVIDER, SETTINGS)
 from security.gliner_detector import detect_gliner_pii
 from security.pii_detector import detect_pii
 from security.regex_detector import detect_regex_pii
@@ -261,8 +261,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 with gr.Blocks(title="AI Security Layer - PII & Gemma Testbed", theme=gr.themes.Soft(), css=custom_css) as demo:
     gr.Markdown(f"""
     # 🛡️ AI Security Layer — Testbed PII & Gemma (OpenRouter)
-    **Chatbot:** `{LLM_PROVIDER}` / `{MODEL}` | **Strefa bezpieczeństwa:** `{SECURITY_PROVIDER}` / `{SECURITY_MODEL}` | **PII Model:** `{PII_MODEL}`
-    **Maskowanie:** `{"włączone" if MASKING_ENABLED else "wyłączone"}` | **Sędzia PII:** `{"włączony" if PII_JUDGE_ENABLED else "wyłączony"}`
+    **Chatbot:** `{LLM_PROVIDER}` / `{MODEL}` | **Strefa bezpieczeństwa:** `{SECURITY_PROVIDER or LLM_PROVIDER}` / `{SECURITY_MODEL or MODEL}` | **PII Model:** `{PII_MODEL}`
+    **Maskowanie:** `{"włączone" if SETTINGS.mask_pii else "wyłączone"}` | **Sędzia PII:** `{"włączony" if PII_JUDGE_ENABLED else "wyłączony"}`
     *Każda wysłana wiadomość użytkownika oraz wygenerowana odpowiedź przechodzi przez moduł wykrywania danych wrażliwych (GLiNER + Regex).*
     """)
 

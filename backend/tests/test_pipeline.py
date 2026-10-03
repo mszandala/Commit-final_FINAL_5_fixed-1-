@@ -108,7 +108,9 @@ def test_analyst_sees_only_pseudonyms(llm, env):
 def test_whitelist_still_blocks_and_tool_is_not_run(llm, env):
     llm.queue = [_reply(tool_calls=[_tool_call("read_client_records", limit=1)]), _reply("Brak dostępu.")]
     result = pipeline.run_turn(pipeline.Conversation("kadry"), "Pokaż klientów")
-    assert result.tool_calls == [{"tool": "read_client_records", "args": {"limit": 1}, "allowed": False}]
+    call = result.tool_calls[0]
+    assert (call["tool"], call["args"], call["allowed"], call["stage"]) == (
+        "read_client_records", {"limit": 1}, False, "tool_whitelist")
     assert "Access denied" in llm.chatbot[-1][-1]["content"]
     assert SALARY not in _sent_to_chatbot(llm)
 
@@ -119,7 +121,7 @@ def test_text_tool_result_is_scanned(llm, env):
         lambda messages: _reply(messages[-1]["content"]),
     ]
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Co jest w projekcie alpha?")
-    assert result.reply == "Kontakt: [UKRYTY EMAIL]"
+    assert result.reply == "Kontakt: [EMAIL]"
     assert EMAIL not in _sent_to_chatbot(llm)
 
 
@@ -156,18 +158,18 @@ def test_judge_decides_only_judge_types(llm, env, monkeypatch):
 def test_output_redact_and_block(llm, env, monkeypatch):
     llm.queue = [_reply(f"Napisz do {EMAIL}")]
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Kto prowadzi projekt?")
-    assert result.reply == "Napisz do [UKRYTY EMAIL]" and not result.blocked
+    assert result.reply == "Napisz do [EMAIL]" and not result.blocked
     assert EMAIL not in _audit(env)
 
     monkeypatch.setitem(ROLES["podstawowy użytkownik"], "pii_policy", {"EMAIL": "block"})
     llm.queue = [_reply(f"Napisz do {EMAIL}")]
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Kto prowadzi projekt?")
-    assert result.blocked and result.block_reason == "output_policy" and EMAIL not in result.reply
+    assert result.blocked and result.block_reason == "pii_policy" and EMAIL not in result.reply
 
 
 def test_public_and_own_values_are_not_redacted():
     text = f"Kontakt {EMAIL}"
-    assert pipeline.filter_output("prawnik", text)[0] == "Kontakt [UKRYTY EMAIL]"
+    assert pipeline.filter_output("prawnik", text)[0] == "Kontakt [EMAIL]"
     assert pipeline.filter_output("prawnik", text, public_texts=[f"README: {EMAIL}"])[0] == text
     assert pipeline.filter_output("prawnik", text, own_texts=[f"mój mail {EMAIL}"])[0] == text
 
@@ -204,7 +206,7 @@ def test_output_filter_ignores_implausible_detections(monkeypatch):
 
     monkeypatch.setattr(pipeline, "detect_pii", detector)
     shown, logged, stats = pipeline.filter_output("IT", "Kobieta, saldo, Jan Kowalski, 5 000 zł")
-    assert shown == "Kobieta, saldo, [UKRYTE IMIĘ I NAZWISKO], [UKRYTE WYNAGRODZENIE]"
+    assert shown == "Kobieta, saldo, [NAME], [SALARY]"
     assert stats["redacted"] == ["NAME", "SALARY"] and "Jan Kowalski" not in logged
 
 

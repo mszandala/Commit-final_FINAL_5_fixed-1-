@@ -69,7 +69,8 @@ def test_gate_allows_whitelisted_and_records_violations():
     assert gate("read_employee_records", {}) is None
     refusal = gate("read_client_records", {"column": "customer_id"})
     assert "read_client_records" in refusal
-    assert gate.violations == [{"tool": "read_client_records", "args": {"column": "customer_id"}, "allowed": False}]
+    assert len(gate.violations) == 1
+    assert gate.violations[0]["tool"] == "read_client_records" and gate.violations[0]["stage"] == "tool_whitelist"
     assert len(gate.calls) == 2
 
 

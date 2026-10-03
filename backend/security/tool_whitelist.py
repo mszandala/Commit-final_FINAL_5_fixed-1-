@@ -10,7 +10,8 @@ def is_allowed(role: str, tool: str) -> bool:
 class ToolGate:
     """Bramka dla agenta: przepuszcza narzędzia z whitelisty roli, resztę odrzuca.
 
-    Każde wywołanie trafia do `calls` jako {"tool", "args", "allowed"} — z tego czyta interfejs.
+    Każde wywołanie trafia do `calls` jako {"tool", "args", "allowed"}, a odrzucone dodatkowo
+    z {"stage", "reason"} — z tego czyta interfejs.
     Na razie każde naruszenie traktujemy jak błąd modelu (pracuje dalej bez narzędzia);
     ocena intencji użytkownika (tool_violation_judge) dojdzie później.
     """
@@ -25,7 +26,10 @@ class ToolGate:
 
     def __call__(self, name: str, args: dict) -> Optional[str]:
         allowed = is_allowed(self.role, name)
-        self.calls.append({"tool": name, "args": args, "allowed": allowed})
+        call = {"tool": name, "args": args, "allowed": allowed}
+        if not allowed:
+            call.update(stage="tool_whitelist", reason=f"Narzędzie niedostępne dla roli „{self.role}”")
+        self.calls.append(call)
         if allowed:
             return None
         return (
