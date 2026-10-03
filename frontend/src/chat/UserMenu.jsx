@@ -14,7 +14,7 @@ export default function UserMenu({ role, account, disabled, onSwitch }) {
         <>
           <Avatar name={current.name} />
           <span className="text-left leading-tight">
-            <span className="block font-semibold">{current.name}</span>
+            <span className="block">{current.name}</span>
             <span className="block text-[13px] text-grey">{current.label}</span>
           </span>
           <ChevronDown size={16} className="text-grey" />

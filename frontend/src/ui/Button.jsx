@@ -11,7 +11,7 @@ const SIZES = {
 export default function Button({ variant = 'secondary', size = 'md', icon: Icon, children, className = '', ...props }) {
   return (
     <button
-      className={`inline-flex items-center gap-1.5 rounded-md border font-semibold disabled:opacity-40 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border disabled:opacity-40 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...props}
     >
       {Icon && <Icon size={size === 'sm' ? 14 : 16} />}

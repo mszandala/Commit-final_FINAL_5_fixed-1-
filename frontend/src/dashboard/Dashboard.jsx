@@ -19,7 +19,7 @@ export default function Dashboard() {
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`-mb-px border-b-2 text-sm font-semibold ${
+              className={`-mb-px border-b-2 text-sm ${
                 tab === t.id ? 'border-navy text-navy' : 'border-transparent text-grey hover:text-ink'
               }`}
             >
