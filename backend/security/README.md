@@ -10,6 +10,8 @@ security/
 ├── prompt_guard.py         # prompt: wzorce injection/jailbreak + czy rola ma dostęp do zasobu
 ├── tool_whitelist.py       # ToolGate: narzędzie z allowed_tools roli?
 ├── code_guard.py           # analiza kodu przed run_python
+├── masking.py              # sejf podstawień, pseudonimy, polityka PII roli (kanał chatbota i użytkownika)
+├── pii_judge.py            # sędzia LLM: czy wartość z promptu może trafić do chatbota
 │
 ├── pii/                    # dane osobowe w odpowiedzi
 │   ├── regex_detector.py   # hasła, e-maile, telefony (EMAIL_PATTERN używa też company_policies)

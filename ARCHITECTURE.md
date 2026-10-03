@@ -116,6 +116,44 @@ Gotowe: `config.py`, `tools/_files.py`, `tools/registry.py`, `chatbot/llm_client
 - `detect_pii(text)` zwraca listę encji `{type, text, start, end}` i skanuje cały tekst fragmentami.
 - Whitelisty w `config.py` są tymczasowe: każda rola ma oba narzędzia ogólne.
 
+## Maskowanie i strefy zaufania
+
+Dwie strefy, rozdzielone w `chatbot/llm_client.py` parametrem `zone`:
+
+| Strefa | Kto | Co widzi | Konfiguracja |
+|---|---|---|---|
+| bezpieczeństwo | strażnik promptu, detektor PII, sędzia | dane surowe | `SECURITY_PROVIDER`, `SECURITY_MODEL` |
+| chatbot | model odpowiadający użytkownikowi | tylko dane zamaskowane | `LLM_PROVIDER`, `OPENROUTER_MODEL` |
+
+Docelowo strefa bezpieczeństwa działa na lokalnej infrastrukturze. W demie obie strefy idą przez
+OpenRouter, więc surowe dane nadal trafiają do dostawcy wywołaniami strefy bezpieczeństwa — log audytu
+oznacza każde wywołanie strefą, żeby było widać, które z nich zostają lokalnie.
+
+Przebieg tury (`pipeline.run_turn`):
+
+1. `prompt_guard` ocenia surowy prompt.
+2. Detektor znajduje encje w prompcie; `CHATBOT_PII_POLICY` decyduje o każdej: `allow`, `redact`,
+   `block` albo `judge`. Typy `judge` rozstrzyga `security/pii_judge.py`; każdy błąd sędziego kończy
+   się maskowaniem, a typów `redact` i `block` sędzia nie dostaje wcale.
+3. Chatbot dostaje prompt ze znacznikami (`<EMAIL_1>`) i pseudonimami (`ID-3fa9c21b07`).
+4. `SecureToolGate` sprawdza whitelist, odmaskowuje argumenty, wykonuje narzędzie lokalnie i maskuje
+   wynik wg `TOOL_RESULT_SCAN`: polityka kolumn dla CSV (`COLUMN_TYPES`), reguły albo pełny detektor
+   dla tekstu. Ścieżki systemowe i stack trace'y są usuwane z każdego wyniku.
+5. `filter_output` przygotowuje odpowiedź wg polityki roli (`DEFAULT_ROLE_PII_POLICY` + `allowed_pii`
+   + `pii_policy` roli + reguły globalne): znacznik wraca jako wartość, etykieta (`[UKRYTY EMAIL]`)
+   albo pseudonim; `block` blokuje całą odpowiedź. Reguły globalne obowiązują każdą rolę:
+   `GLOBAL_BLOCKED_PII` (hasło, numer karty) blokuje, `GLOBAL_REDACTED_PII` (e-mail, telefon) ukrywa.
+   Typ spoza `allowed_pii` jest ukrywany, a nie blokuje odpowiedzi. Nie ukrywa wartości, które użytkownik sam wpisał, ani pochodzących
+   z narzędzi czytających źródła publiczne (`PUBLIC_SOURCE_TOOLS`).
+6. `audit/logger.py` zapisuje zdarzenia tury do `audit/events.jsonl` — bez surowych wartości encji.
+
+Sejf podstawień (`security/masking.py`, klasa `Vault`) żyje tyle, co rozmowa. Identyfikatory
+(`CLIENT-ID`, `ACCOUNT-NO`, `EMPLOYEE-ID`) dostają pseudonim HMAC z kluczem `PSEUDONYM_KEY`, taki sam
+w każdej rozmowie; analityk widzi wyłącznie pseudonimy.
+
+Pomiar: `python eval_masking.py [--judge] [-v]` z katalogu `backend/` liczy przecieki i nadgorliwość
+na `tests/datasets/output_guardrail_tests.json`, osobno dla kanału użytkownika i kanału chatbota.
+
 ## Do ustalenia
 
 - Model PII: wdrożono hybrydowy model `urchade/gliner_small-v2.1` z regułami regex dla haseł,

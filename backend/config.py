@@ -24,6 +24,22 @@ MODEL = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else OLLAMA_MODEL
 PII_MODEL = os.getenv("PII_MODEL", "urchade/gliner_small-v2.1")
 PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
+# Strefa bezpieczeństwa (strażnicy, sędziowie): widzi dane surowe i docelowo działa na lokalnej
+# infrastrukturze. Dziś idzie tym samym providerem co chatbot; zmiana to dwie zmienne w .env.
+SECURITY_PROVIDER = os.getenv("SECURITY_PROVIDER", "") or LLM_PROVIDER
+SECURITY_MODEL = os.getenv("SECURITY_MODEL", "") or (
+    OPENROUTER_MODEL if SECURITY_PROVIDER == "openrouter" else OLLAMA_MODEL
+)
+
+# Maskowanie danych wrażliwych w strefie chatbota (prompt, historia, wyniki narzędzi)
+MASKING_ENABLED = os.getenv("MASKING_ENABLED", "true").lower() == "true"
+# Sędzia LLM dla typów oznaczonych "judge" w CHATBOT_PII_POLICY; wyłączony = zawsze maskuj
+PII_JUDGE_ENABLED = os.getenv("PII_JUDGE_ENABLED", "true").lower() == "true"
+# Klucz HMAC do pseudonimizacji identyfikatorów; pusty = losowy na czas działania procesu
+PSEUDONYM_KEY = os.getenv("PSEUDONYM_KEY", "")
+
+AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
+
 BASE_DIR       = Path(__file__).parent / "data"
 CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
 
@@ -86,9 +102,11 @@ ROLES = {
         "allowed_pii": ["PROJECT", "ORGANIZATION"],
     },
     "analityk": {
-        "description": "Analityk danych; pracuje na anonimowych danych kampanii oraz danych rynkowych.",
-        "allowed_tools": _PROJECTS + _CAMPAIGNS + _MARKET + _SUBAGENT,
+        "description": "Analityk danych; pracuje na danych kampanii, spseudonimizowanych rekordach klientów oraz danych rynkowych.",
+        "allowed_tools": _PROJECTS + _CLIENTS + _CAMPAIGNS + _MARKET + _SUBAGENT,
         "allowed_pii": ["SALARY", "ORGANIZATION", "LOCATION", "PROJECT"],
+        # Widzi rekordy klientów, ale identyfikatory tylko jako stałe pseudonimy.
+        "pii_policy": {"CLIENT-ID": "pseudonymize", "ACCOUNT-NO": "pseudonymize", "EMPLOYEE-ID": "pseudonymize"},
     },
     "prawnik": {
         "description": "Dział prawny; analizuje publiczne wypowiedzi spółek z telekonferencji wynikowych.",
@@ -101,3 +119,89 @@ ROLES = {
         "allowed_pii": ["SALARY", "ORGANIZATION", "NAME", "LOCATION", "PROJECT"],
     },
 }
+
+
+# --- Polityki danych wrażliwych -------------------------------------------------------------
+# Działania: "allow" (pokaż), "redact" (zamaskuj), "block" (zablokuj całość),
+#            "judge" (tylko kanał chatbota: decyduje sędzia LLM), "pseudonymize" (tylko identyfikatory).
+
+# Kanał chatbota: co z promptu użytkownika może zobaczyć model w chmurze. Jedna polityka,
+# niezależna od roli. Sędzia rozstrzyga wyłącznie typy "judge"; "redact" i "block" to twardy sufit.
+CHATBOT_PII_POLICY = {
+    "PASSWORD":       "redact",
+    "EMAIL":          "redact",
+    "PHONE-NO":       "redact",
+    "CREDIT-CARD-NO": "redact",
+    "CLIENT-ID":      "redact",
+    "ACCOUNT-NO":     "redact",
+    "EMPLOYEE-ID":    "redact",
+    "NAME":           "judge",
+    "SALARY":         "judge",
+    "ORGANIZATION":   "allow",
+    "LOCATION":       "allow",
+    "PROJECT":        "allow",
+}
+
+# Kanał użytkownika, w kolejności stosowania (security/masking.py: role_policy):
+#   1. DEFAULT_ROLE_PII_POLICY - punkt wyjścia; typ spoza tej mapy jest ukrywany,
+#   2. `allowed_pii` roli      - "allow",
+#   3. `pii_policy` roli       - nadpisuje pojedyncze typy,
+#   4. GLOBAL_BLOCKED_PII / GLOBAL_REDACTED_PII - obowiązują każdą rolę; `pii_policy` może je
+#      tylko zaostrzyć, nigdy złagodzić.
+# Typ spoza `allowed_pii` jest ukrywany, a nie blokuje całej odpowiedzi.
+DEFAULT_ROLE_PII_POLICY = {
+    "NAME":           "redact",
+    "SALARY":         "redact",
+    "ORGANIZATION":   "redact",
+    "LOCATION":       "redact",
+    "PROJECT":        "redact",
+    "CLIENT-ID":      "allow",     # kto ma narzędzie do rekordów, ten widzi ich identyfikatory
+    "ACCOUNT-NO":     "allow",
+    "EMPLOYEE-ID":    "allow",
+}
+
+# Typy, których wartości zamieniamy na stałe pseudonimy (HMAC) zamiast kolejnych znaczników.
+ID_TYPES = ["CLIENT-ID", "ACCOUNT-NO", "EMPLOYEE-ID"]
+
+# Kolumny CSV z danymi wrażliwymi: narzędzie -> kolumna -> typ.
+COLUMN_TYPES = {
+    "read_client_records": {
+        "customer_id": "CLIENT-ID",
+        "account_number": "ACCOUNT-NO",     # zawiera w sobie customer_id
+        "estimated_salary": "SALARY",
+    },
+    "read_employee_records": {
+        "EmployeeNumber": "EMPLOYEE-ID",
+        "MonthlyIncome": "SALARY",
+        "MonthlyRate": "SALARY",
+        "DailyRate": "SALARY",
+        "HourlyRate": "SALARY",
+    },
+}
+
+# Jak skanować wynik narzędzia, zanim trafi do chatbota:
+#   "columns" - polityka kolumn CSV (COLUMN_TYPES), bez detektora
+#   "regex"   - tylko reguły (hasła, e-maile, telefony); dla dużych tekstów ze źródeł publicznych
+#   "full"    - reguły + GLiNER, z pamięcią podręczną
+#   "none"    - bez skanowania (wynik powstał już w strefie chatbota)
+TOOL_RESULT_SCAN = {
+    "read_client_records":   "columns",
+    "read_employee_records": "columns",
+    "read_bank_campaigns":   "none",
+    "read_stock_prices":     "none",
+    "list_projects":         "none",
+    "list_earnings_calls":   "none",
+    "read_project":          "regex",
+    "read_earnings_call":    "regex",
+    "create_subagent":       "none",
+}
+DEFAULT_TOOL_RESULT_SCAN = "full"
+
+# Narzędzia czytające źródła publiczne: wartości z ich wyników nie są traktowane jak PII w odpowiedzi.
+PUBLIC_SOURCE_TOOLS = [
+    "list_projects", "read_project", "read_bank_campaigns",
+    "read_stock_prices", "list_earnings_calls", "read_earnings_call",
+]
+
+# Narzędzia, których argumenty trafiają z powrotem do modelu w chmurze — nie odmaskowujemy ich.
+CHATBOT_ZONE_TOOLS = ["create_subagent"]
