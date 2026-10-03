@@ -2,15 +2,25 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { getEvents } from '../mock/events'
 import { formatNumber } from '../format'
-import StatusTag from '../ui/StatusTag'
 
 const DECISIONS = ['All', 'Allowed', 'Redacted', 'Blocked']
+
+// Left-edge bar and row tint mark the decision.
+const BARS = {
+  Allowed: 'shadow-[inset_4px_0_0_var(--color-green)]',
+  Redacted: 'shadow-[inset_4px_0_0_var(--color-amber)]',
+  Blocked: 'shadow-[inset_4px_0_0_var(--color-red)]',
+}
+const TINTS = {
+  Allowed: 'bg-green/10 hover:bg-green/20',
+  Redacted: 'bg-amber/10 hover:bg-amber/20',
+  Blocked: 'bg-red/10 hover:bg-red/20',
+}
 
 const COLUMNS = [
   { label: 'Time' },
   { label: 'User' },
   { label: 'Role' },
-  { label: 'Decision' },
   { label: 'Control' },
   { label: 'Reason' },
   { label: 'Tokens', numeric: true },
@@ -67,53 +77,55 @@ export default function Logs() {
         </label>
       </div>
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-6 pb-5">
-        <table className="w-full border-separate border-spacing-0 rounded-md border border-line bg-white text-sm tabular-nums">
-          <thead>
-            <tr>
-              {COLUMNS.map((c) => (
-                <th
-                  key={c.label}
-                  className={`sticky top-0 border-b border-line bg-white px-2.5 py-1 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
-                    c.numeric ? 'text-right' : 'text-left'
-                  }`}
-                >
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id} className="hover:bg-page">
-                <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pl-4" title={e.time.toLocaleString('en-GB')}>
-                  <span className="mr-2 text-grey">{dateOf(e.time)}</span>
-                  {timeOf(e.time)}
-                </td>
-                <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.user}>
-                  {e.user}
-                </td>
-                <td className="max-w-24 truncate border-b border-line px-2.5 py-1 text-grey" title={e.role}>
-                  {e.role}
-                </td>
-                <td className="whitespace-nowrap border-b border-line px-2.5 py-1">
-                  <StatusTag status={e.decision} />
-                </td>
-                <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.control}>
-                  {e.control || <span className="text-grey">–</span>}
-                </td>
-                <td className="border-b border-line px-2.5 py-1 text-grey">
-                  <div className="line-clamp-2 max-w-60" title={e.reason}>
-                    {e.reason}
-                  </div>
-                </td>
-                <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
-                <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latency)} ms</td>
+      <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
+        <div ref={scroller} className="min-h-0 overflow-auto rounded-md border border-line bg-white">
+          <table className="w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
+            <thead>
+              <tr>
+                {COLUMNS.map((c) => (
+                  <th
+                    key={c.label}
+                    className={`sticky top-0 border-b border-line bg-white px-2.5 py-2 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
+                      c.numeric ? 'text-right' : 'text-left'
+                    }`}
+                  >
+                    {c.label}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {events.length === 0 && <p className="py-10 text-center text-grey">No matching events</p>}
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.id} className={TINTS[e.decision]}>
+                  <td
+                    className={`whitespace-nowrap border-b border-line px-2.5 py-1 pl-4 ${BARS[e.decision]}`}
+                    title={e.time.toLocaleString('en-GB')}
+                  >
+                    <span className="mr-2 text-grey">{dateOf(e.time)}</span>
+                    {timeOf(e.time)}
+                  </td>
+                  <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.user}>
+                    {e.user}
+                  </td>
+                  <td className="max-w-24 truncate border-b border-line px-2.5 py-1 text-grey" title={e.role}>
+                    {e.role}
+                  </td>
+                  <td className="max-w-40 truncate border-b border-line px-2.5 py-1" title={e.control}>
+                    {e.control || <span className="text-grey">–</span>}
+                  </td>
+                  <td className="border-b border-line px-2.5 py-1 text-grey">
+                    <div className="line-clamp-2 max-w-60" title={e.reason}>
+                      {e.reason}
+                    </div>
+                  </td>
+                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 text-right">{formatNumber(e.tokens)}</td>
+                  <td className="whitespace-nowrap border-b border-line px-2.5 py-1 pr-4 text-right">{formatNumber(e.latency)} ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {events.length === 0 && <p className="py-10 text-center text-grey">No matching events</p>}
+        </div>
       </div>
     </div>
   )
