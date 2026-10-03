@@ -107,7 +107,7 @@ Proponowane przypisanie narzędzi do ról:
 ## Stan implementacji
 
 Gotowe: `config.py`, `tools/_files.py`, `tools/registry.py`, `chatbot/llm_client.py`,
-`chatbot/agent.py`, `security/pii_detector.py`, `tests/test_agent.py`, `tests/test_pii.py`.
+`chatbot/agent.py`, `security/pii/pii_detector.py`, `tests/test_agent.py`, `tests/test_pii.py`.
 
 - Testy: `python -m pytest tests` uruchamiane z katalogu `backend/`.
 - `agent.run_agent(message, history, tool_gate)` — `tool_gate` to miejsce na `tool_whitelist`

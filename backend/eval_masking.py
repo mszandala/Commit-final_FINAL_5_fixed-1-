@@ -17,7 +17,7 @@ from pathlib import Path
 import pipeline
 from security.masking import chatbot_action
 from security.pii_judge import judge_entities
-from security.prompt_guard import normalize_role
+from security.common.roles import normalize_role
 
 DATASET = Path(__file__).parent / "tests" / "datasets" / "output_guardrail_tests.json"
 

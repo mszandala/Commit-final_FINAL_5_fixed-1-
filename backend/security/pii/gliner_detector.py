@@ -1,9 +1,8 @@
 from functools import lru_cache
 from typing import Optional
 
-from gliner import GLiNER
-
 from config import PII_MODEL, PII_THRESHOLD
+from security.common.spans import by_position
 
 # Mapowanie etykiet modelu zero-shot na kanoniczne kategorie PII/bezpieczeństwa
 LABEL_MAP = {
@@ -34,8 +33,13 @@ PRONOUNS = {
 
 
 @lru_cache(maxsize=1)
-def _load_model() -> GLiNER:
-    """Ładuje model GLiNER w pamięci podręcznej."""
+def _load_model():
+    """Ładuje model GLiNER w pamięci podręcznej.
+
+    Import leniwy: gliner ciągnie torch (kilka sekund), więc import security.pii.pii_detector
+    nie spowalnia startu aplikacji, dopóki detekcja PII nie jest faktycznie potrzebna.
+    """
+    from gliner import GLiNER
     return GLiNER.from_pretrained(PII_MODEL)
 
 
@@ -99,5 +103,5 @@ def detect_gliner_pii(text: str, threshold: Optional[float] = None) -> list[dict
                 "end": final_end,
             })
 
-    entities.sort(key=lambda e: (e["start"], -(e["end"] - e["start"])))
+    entities.sort(key=by_position)
     return entities

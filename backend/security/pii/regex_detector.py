@@ -1,5 +1,7 @@
 import re
 
+from security.common.spans import by_position
+
 # Wzorce regex dla danych deterministycznych (hasła, sekrety, numery telefonów, e-maile)
 PASSWORD_PATTERN = re.compile(
     r'(?:password|pwd|secret|api[_-]?key|token)(\s*[:=]\s*|\s+is\s+|\s+)(\S+)',
@@ -12,7 +14,8 @@ SECRET_TOKEN_PATTERN = re.compile(
     r'|\bAKIA[0-9A-Z]{16}\b)'
 )
 PHONE_PATTERN = re.compile(r'(\+?\d[\d\s\-\(\)]{7,}\d)')
-EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+# Grupa 1 = domena; z tego samego wzorca company_policies sprawdza, czy adres jest wewnętrzny.
+EMAIL_PATTERN = re.compile(r'[\w.+-]+@([\w-]+(?:\.[\w-]+)+)')
 CARD_PATTERN = re.compile(r'(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)')
 # Identyfikatory rekordów: sama liczba nic nie znaczy, więc wymagamy słowa kluczowego tuż przed nią.
 CLIENT_ID_PATTERN = re.compile(
@@ -112,5 +115,5 @@ def detect_regex_pii(text: str) -> list[dict]:
                 "end": end,
             })
 
-    entities.sort(key=lambda e: (e["start"], -(e["end"] - e["start"])))
+    entities.sort(key=by_position)
     return entities

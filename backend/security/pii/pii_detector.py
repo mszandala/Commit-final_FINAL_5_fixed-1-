@@ -1,7 +1,8 @@
 from typing import Optional
 
-from security.gliner_detector import detect_gliner_pii
-from security.regex_detector import detect_regex_pii
+from security.pii.gliner_detector import detect_gliner_pii
+from security.pii.regex_detector import detect_regex_pii
+from security.common.spans import by_position
 
 
 def _merge_entities(entities: list[dict]) -> list[dict]:
@@ -9,7 +10,7 @@ def _merge_entities(entities: list[dict]) -> list[dict]:
 
     Sortuje po indeksie startowym (rosnąco) i długości (malejąco).
     """
-    entities.sort(key=lambda e: (e["start"], -(e["end"] - e["start"])))
+    entities.sort(key=by_position)
     merged: list[dict] = []
     for e in entities:
         if not merged:

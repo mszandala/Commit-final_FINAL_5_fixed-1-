@@ -1,12 +1,11 @@
 from config import GLOBAL_BLOCKED_PII, GLOBAL_REDACTED_PII, ROLES
-from security.verdicts import Verdict
+from security.common.spans import replace_spans
+from security.common.verdicts import Verdict
 
 
 def redact(text: str, entities: list[dict]) -> str:
-    """Zastępuje fragmenty encji znacznikiem [TYP]; encje nie mogą na siebie nachodzić."""
-    for e in sorted(entities, key=lambda e: e["start"], reverse=True):
-        text = text[: e["start"]] + f"[{e['type']}]" + text[e["end"]:]
-    return text
+    """Zastępuje fragmenty encji znacznikiem [TYP]."""
+    return replace_spans(text, [(e["start"], e["end"], f"[{e['type']}]") for e in entities])
 
 
 def check_pii(role: str, text: str, entities: list[dict]) -> Verdict:
@@ -15,11 +14,14 @@ def check_pii(role: str, text: str, entities: list[dict]) -> Verdict:
     Kolejność: globalna blokada > typy spoza allowed_pii roli (blokada, do oceny przez
     pii_access_judge) > globalne maskowanie > przepuszczenie.
     """
+    # Konfiguracja czytana przy każdym wywołaniu: zmiana ROLES działa bez restartu.
     allowed = set(ROLES.get(role, {}).get("allowed_pii", []))
-    blocked = [e for e in entities if e["type"] in GLOBAL_BLOCKED_PII]
-    masked = [e for e in entities if e["type"] in GLOBAL_REDACTED_PII]
+    always_blocked, always_masked = set(GLOBAL_BLOCKED_PII), set(GLOBAL_REDACTED_PII)
+    blocked = [e for e in entities if e["type"] in always_blocked]
+    masked = [e for e in entities if e["type"] in always_masked]
+    # Typ zamiast porównywania słowników encji (`e not in blocked`), które było O(n²).
     denied = [e for e in entities
-              if e["type"] not in allowed and e not in blocked and e not in masked]
+              if e["type"] not in allowed and e["type"] not in always_blocked and e["type"] not in always_masked]
 
     if blocked:
         return Verdict("block", f"Odpowiedź zawiera zawsze zablokowane dane: {_types(blocked)}",

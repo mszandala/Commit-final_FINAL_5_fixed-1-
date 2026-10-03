@@ -14,9 +14,9 @@ import gradio as gr
 import pipeline
 from config import (LLM_PROVIDER, MASKING_ENABLED, MODEL, PII_JUDGE_ENABLED, PII_MODEL, ROLES,
                     SECURITY_MODEL, SECURITY_PROVIDER)
-from security.gliner_detector import detect_gliner_pii
-from security.pii_detector import detect_pii
-from security.regex_detector import detect_regex_pii
+from security.pii.gliner_detector import detect_gliner_pii
+from security.pii.pii_detector import detect_pii
+from security.pii.regex_detector import detect_regex_pii
 
 # Stan historii czatu w formacie Gradio
 chat_history_state = []

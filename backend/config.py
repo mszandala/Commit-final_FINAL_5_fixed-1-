@@ -12,7 +12,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
 # Konfiguracja OpenRouter
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 
 # Konfiguracja Ollama
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
@@ -42,9 +42,13 @@ AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
 
 BASE_DIR       = Path(__file__).parent / "data"
 CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
+
+# Dane modułu company_policies. Celowo poza CONTEXT_FOLDERS: agent nie czyta ich narzędziami plikowymi.
+COMPANY_DOCUMENTS_DIR = BASE_DIR / "company_documents"  # regulaminy, NDA, polityki (.md ze znacznikami control:)
+COMPANY_FIXTURES_DIR  = BASE_DIR / "company_fixtures"   # poufne materiały do fingerprintingu
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
-
+MAX_SPENDING = 0.5
 # Narzędzia pogrupowane po domenach danych (podfoldery data/).
 _GENERIC_TOOLS = ["list_files", "read_file"]
 _PROJECTS  = ["list_projects", "read_project"]
