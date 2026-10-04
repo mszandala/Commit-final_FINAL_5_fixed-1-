@@ -413,93 +413,106 @@ export default function Tests({ onOpenLogs }) {
                   <h3 className="font-semibold text-navy">{group.label}</h3>
                   <p className="text-[13px] text-grey">{group.description}</p>
                 </div>
-                <Button size="sm" icon={Play} disabled={running} onClick={() => start(scenarios.map((s) => s.id))}>
+                <Button
+                  size="sm"
+                  icon={Play}
+                  disabled={running}
+                  onClick={() => start(scenarios.map((s) => s.id))}
+                  className="shrink-0 whitespace-nowrap"
+                >
                   Run group
                 </Button>
               </div>
-              <table className="w-full table-fixed text-sm">
-                <thead>
-                  <tr>
-                    <th className={`${TH} w-10`} />
-                    <th className={TH}>Test</th>
-                    <th className={`${TH} w-32`}>Role</th>
-                    <th className={`${TH} w-48`}>Expected</th>
-                    <th className={`${TH} w-48`}>Result</th>
-                    <th className={`${TH} w-20 text-right`}>Latency</th>
-                    <th className={`${TH} w-14`} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {scenarios.map((s) => {
-                    const result = results[s.id]
-                    const status = STATUS[statusOf(s.id)]
-                    const isOpen = open[s.id]
-                    return (
-                      <Fragment key={s.id}>
-                        <tr
-                          onClick={() => setOpen({ ...open, [s.id]: !isOpen })}
-                          className="cursor-pointer hover:bg-blue-light/20"
-                        >
-                          <td className={`${TD} pl-4`} title={status.label}>
-                            <status.icon size={16} className={status.className} />
-                          </td>
-                          <td className={TD}>
-                            <span className="flex items-center gap-1.5">
-                              <ChevronRight
-                                size={14}
-                                className={`shrink-0 text-grey transition-transform ${isOpen ? 'rotate-90' : ''}`}
-                              />
-                              <span className="truncate">{s.title}</span>
-                              {s.mode === 'mock' && (
-                                <Badge className="bg-amber/20 text-amber-text" title="Scripted model reply: no model is called">
-                                  mock
-                                </Badge>
-                              )}
-                              {s.variants && (
-                                <Badge className="bg-blue-light text-ink" title="Run once per variant, shown side by side">
-                                  {s.variants.length} variants
-                                </Badge>
-                              )}
-                              {s.config && <Badge className="bg-violet/15">settings</Badge>}
-                            </span>
-                          </td>
-                          <td className={`${TD} truncate`}>{s.roleLabel}</td>
-                          <td className={`${TD} truncate text-grey`}>
-                            <Expected expect={s.expect} variants={s.variants} fallback={s.expect} />
-                          </td>
-                          <td className={`${TD} truncate`}>
-                            <ResultCell result={result} />
-                          </td>
-                          <td className={`${TD} text-right tabular-nums text-grey`}>
-                            {result ? `${(sumOf(result, 'latencyMs') / 1000).toFixed(1)} s` : ''}
-                          </td>
-                          <td className={`${TD} pr-4 text-right`}>
-                            <button
-                              aria-label={`Run ${s.title}`}
-                              title="Run this test"
-                              disabled={running}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                start([s.id])
-                              }}
-                              className="rounded-md p-1 text-grey hover:bg-page hover:text-navy disabled:opacity-40"
-                            >
-                              <Play size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                        {isOpen && (
-                          <tr>
-                            <td colSpan={7} className="border-b border-line p-0">
-                              <Details scenario={s} result={result} onOpenLogs={onOpenLogs} />
+              {/* The other columns have fixed widths, so in a narrow pane the Test column would shrink to
+                  nothing and its arrow and badges would spill into Role. Under the minimum width the
+                  table scrolls sideways instead. */}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[55rem] table-fixed text-sm">
+                  <thead>
+                    <tr>
+                      <th className={`${TH} w-10`} />
+                      <th className={TH}>Test</th>
+                      <th className={`${TH} w-32`}>Role</th>
+                      <th className={`${TH} w-48`}>Expected</th>
+                      <th className={`${TH} w-48`}>Result</th>
+                      <th className={`${TH} w-20 text-right`}>Latency</th>
+                      <th className={`${TH} w-14`} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scenarios.map((s) => {
+                      const result = results[s.id]
+                      const status = STATUS[statusOf(s.id)]
+                      const isOpen = open[s.id]
+                      return (
+                        <Fragment key={s.id}>
+                          <tr
+                            onClick={() => setOpen({ ...open, [s.id]: !isOpen })}
+                            className="cursor-pointer hover:bg-blue-light/20"
+                          >
+                            <td className={`${TD} pl-4`} title={status.label}>
+                              <status.icon size={16} className={status.className} />
+                            </td>
+                            <td className={`${TD} overflow-hidden`}>
+                              <span className="flex items-center gap-1.5">
+                                <ChevronRight
+                                  size={14}
+                                  className={`shrink-0 text-grey transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                                />
+                                <span className="truncate" title={s.title}>
+                                  {s.title}
+                                </span>
+                                {s.mode === 'mock' && (
+                                  <Badge className="bg-amber/20 text-amber-text" title="Scripted model reply: no model is called">
+                                    mock
+                                  </Badge>
+                                )}
+                                {s.variants && (
+                                  <Badge className="bg-blue-light text-ink" title="Run once per variant, shown side by side">
+                                    {s.variants.length} variants
+                                  </Badge>
+                                )}
+                                {s.config && <Badge className="bg-violet/15">settings</Badge>}
+                              </span>
+                            </td>
+                            <td className={`${TD} truncate`}>{s.roleLabel}</td>
+                            <td className={`${TD} truncate text-grey`}>
+                              <Expected expect={s.expect} variants={s.variants} fallback={s.expect} />
+                            </td>
+                            <td className={`${TD} truncate`}>
+                              <ResultCell result={result} />
+                            </td>
+                            <td className={`${TD} text-right tabular-nums text-grey`}>
+                              {result ? `${(sumOf(result, 'latencyMs') / 1000).toFixed(1)} s` : ''}
+                            </td>
+                            <td className={`${TD} pr-4 text-right`}>
+                              <button
+                                aria-label={`Run ${s.title}`}
+                                title="Run this test"
+                                disabled={running}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  start([s.id])
+                                }}
+                                className="rounded-md p-1 text-grey hover:bg-page hover:text-navy disabled:opacity-40"
+                              >
+                                <Play size={14} />
+                              </button>
                             </td>
                           </tr>
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          {isOpen && (
+                            <tr>
+                              <td colSpan={7} className="border-b border-line p-0">
+                                <Details scenario={s} result={result} onOpenLogs={onOpenLogs} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )
         })}
