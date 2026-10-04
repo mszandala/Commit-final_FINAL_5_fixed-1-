@@ -2,10 +2,23 @@
 from typing import Any
 
 from audit import logger as audit
-from security.company_policies.detection import detect_deterministic
+from chatbot import llm_client
+from security.company_policies.detection import (
+    build_classifier_messages,
+    detect_deterministic,
+    parse_classification,
+)
 from security.company_policies.enforcer import violation_type
 
 from .models import Policy
+
+
+def security_zone_classifier(text: str, categories: dict, policy) -> dict:
+    """Klasyfikator semantyczny regulaminów wywoływany w strefie bezpieczeństwa zamiast przez
+    providera z nagłówka rules.txt."""
+    reply = llm_client.chat(build_classifier_messages(text, categories), zone="security",
+                            purpose="company_policy_classifier")
+    return parse_classification(getattr(reply, "content", ""), categories)
 
 
 def _warned(verdict):

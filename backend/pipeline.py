@@ -52,6 +52,7 @@ from config import (
     TOOL_RESULT_SCAN,
 )
 from core import Policy
+from core.company import security_zone_classifier
 from core.context import TurnContext
 from core.notice import build_notice
 from core.pii import (
@@ -64,7 +65,6 @@ from core.stages import TOOL_PLACEHOLDER, check_request, check_response, hide_to
 from core.tool_guard import ToolGuard
 from security import refusal_detector
 from security.company_policies import CompanyPolicyEngine
-from security.company_policies.detection import build_classifier_messages, parse_classification
 from security.common.verdicts import Verdict
 from security.masking import Vault
 from security.pii.pii_detector import detect_pii
@@ -150,9 +150,7 @@ _policy_engine: Optional[CompanyPolicyEngine] = None
 def _security_zone_classifier(text: str, categories: dict, policy) -> dict:
     """Klasyfikator semantyczny regulaminów wywoływany w strefie bezpieczeństwa zamiast przez
     providera z nagłówka rules.txt (w demie lokalnej Ollamy nie ma)."""
-    reply = llm_client.chat(build_classifier_messages(text, categories), zone="security",
-                            purpose="company_policy_classifier")
-    return parse_classification(getattr(reply, "content", ""), categories)
+    return security_zone_classifier(text, categories, policy)
 
 
 def policy_engine() -> Optional[CompanyPolicyEngine]:

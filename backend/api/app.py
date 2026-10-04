@@ -20,6 +20,8 @@ import pipeline
 from api import metrics as metrics_mod
 from api import schemas, state
 from core import PolicyError, get_store
+from proxy import create_router as create_proxy_router
+from proxy import get_engine as get_proxy_engine
 from api.steps import LEVELS, STEP_KINDS, ZONES
 from audit import store
 from config import (
@@ -455,12 +457,27 @@ def delete_comment(comment_id: int):
         raise HTTPException(404, f"Nieznany komentarz: {comment_id}")
 
 
+def _proxy_turn(report: dict) -> None:
+    """Tura przez proxy trafia do tego samego logu co czat z interfejsu (dla ról znanych w config.ROLES)."""
+    if report["role"] not in ROLES:
+        return
+    result = pipeline.TurnResult(
+        reply=report["reply"], blocked=report["blocked"], block_reason=report["block_reason"],
+        guard=report["guard"], masked_prompt=report["masked_prompt"], prompt_entities=report["entities"],
+        tool_calls=report["tool_calls"], output=report["output"], leaks_to_chatbot=0, events=report["events"],
+        verdict=report["verdict"], tokens=report["tokens"], latency_ms=report["latency_ms"], error=None,
+        cost=report["cost"], verdicts=report["verdicts"], masked_for_model=report["masked_for_model"])
+    state.add_event(report["role"], report["conversation_id"], report["verdict"], result)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AI Security Layer API", version="1.0.0", lifespan=_lifespan)
     origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
     app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in origins if o.strip()],
                        allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
+    get_proxy_engine().on_turn = _proxy_turn
+    app.include_router(create_proxy_router(get_proxy_engine))      # /v1/chat/completions, /v1/models
     return app
 
 

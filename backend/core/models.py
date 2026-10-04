@@ -6,6 +6,8 @@ domyślnymi (wyłącza się wyłącznie jawnie: `enabled: false`). Role, narzęd
 wartości domyślnych: opisuje je plik. Nieznane klucze są odrzucane, żeby literówka w pliku nie
 kończyła się cichym brakiem zabezpieczenia.
 """
+import hashlib
+import hmac
 from fnmatch import fnmatchcase
 from typing import Literal, Optional
 
@@ -144,6 +146,23 @@ class Role(_Model):
     daily_tokens: int = Field(gt=0)
 
 
+class Client(_Model):
+    """Klient proxy: klucz API (w pliku tylko jego skrót SHA-256) przypisany do roli."""
+    name: str
+    role: str
+    key_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+
+
+class ProxySettings(_Model):
+    """Ustawienia proxy `/v1/chat/completions`."""
+    default_model: str = ""                         # pusty = model wdrożenia (z konfiguracji procesu)
+    max_reasks: int = Field(2, ge=0, le=5)          # ile razy proxy ponawia pytanie do modelu po odrzuconym narzędziu
+    session_ttl_seconds: int = Field(3600, gt=0)    # po tylu sekundach bez ruchu sejf rozmowy jest usuwany
+    max_sessions: int = Field(1000, gt=0)
+    max_body_bytes: int = Field(1_048_576, gt=0)
+    max_messages: int = Field(200, gt=0)
+
+
 class ProfileOverride(_Model):
     """Profil ścisłości: częściowe nadpisanie sekcji `controls` i `budgets` (scalane rekurencyjnie)."""
     controls: dict = {}
@@ -156,6 +175,8 @@ class Policy(_Model):
     profile_names: tuple[str, ...] = ()
     controls: Controls = Controls()
     models: ModelsPolicy = ModelsPolicy()
+    proxy: ProxySettings = ProxySettings()
+    clients: list[Client] = []
     budgets: Budgets = Budgets()
     pii: PiiSection = PiiSection()
     tool_defaults: ToolDefaults = ToolDefaults()
@@ -169,6 +190,12 @@ class Policy(_Model):
         ids = [r.id for r in self.roles.values()]
         if len(ids) != len(set(ids)):
             raise ValueError("roles: identyfikatory (id) ról muszą być unikalne")
+        names = [c.name for c in self.clients]
+        if len(names) != len(set(names)):
+            raise ValueError("clients: nazwy klientów muszą być unikalne")
+        unknown = sorted({c.role for c in self.clients if self.roles and c.role not in self.roles})
+        if unknown:
+            raise ValueError(f"clients: nieznane role {unknown}; dostępne: {', '.join(self.roles)}")
         return self
 
     # --- zapytania o politykę (czyste funkcje, bez stanu) -------------------------------------
@@ -180,6 +207,15 @@ class Policy(_Model):
 
     def filters(self) -> dict[str, bool]:
         return {name: self.filter_on(name) for name in FILTER_IDS}
+
+    def client_for_key(self, token: str) -> Optional["Client"]:
+        """Klient o podanym kluczu API (porównanie skrótów w stałym czasie) albo None."""
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        found = None
+        for client in self.clients:             # bez wcześniejszego wyjścia: czas nie zdradza pozycji klucza
+            if hmac.compare_digest(client.key_sha256.lower(), digest):
+                found = client
+        return found
 
     def is_model_allowed(self, model: str) -> bool:
         """Czy model wolno wywołać; bez listy dozwolonych (albo przy wyłączonej kontroli) każdy."""

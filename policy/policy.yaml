@@ -115,6 +115,28 @@ models:
     - gemma4:12b
 
 # -------------------------------------------------------------------------------------
+#  Proxy zgodne z OpenAI: POST /v1/chat/completions
+#  Aplikacja zmienia tylko base_url (np. http://127.0.0.1:8000/v1) i klucz API; rolę wyznacza klucz.
+# -------------------------------------------------------------------------------------
+proxy:
+  default_model: ""          # pusty = model wdrożenia; klient może podać inny z listy `models`
+  max_reasks: 2              # ile razy proxy ponawia pytanie do modelu po odrzuconym narzędziu
+  session_ttl_seconds: 3600  # po tylu sekundach bez ruchu sejf rozmowy (wartości ukryte przed modelem) jest usuwany
+  max_sessions: 1000
+  max_body_bytes: 1048576
+  max_messages: 200
+
+# Klienci proxy: nazwa, rola i SKRÓT SHA-256 klucza API (jawnego klucza nie ma w pliku).
+# Skrót klucza: python -m proxy hash-key <klucz>
+# UWAGA: poniższe klucze są jawne w dokumentacji i służą tylko do demonstracji; wygeneruj własne.
+#   demo-basic: sk-demo-basic-user   demo-hr: sk-demo-hr   demo-banker: sk-demo-banker   demo-admin: sk-demo-admin
+clients:
+  - {name: demo-basic, role: "podstawowy użytkownik", key_sha256: 3761ff74ef290916d9cc795731cd8b50d04fcaf6df2c97d20aa76fda9181b17b}
+  - {name: demo-hr, role: kadry, key_sha256: df4fe706ff5796d86968d559bba341f2f362e54dcbb68cb967aa3058ed7e2561}
+  - {name: demo-banker, role: bankier, key_sha256: f7057ea606c248b33582a310d6d8f1f6d3e78f32478179a3af4f653f861f8c6e}
+  - {name: demo-admin, role: administrator, key_sha256: a1304128f87ba7aa357d7fe938db628cccb9ad9465ba832773a604aed2cfd54e}
+
+# -------------------------------------------------------------------------------------
 #  Budżety i zasoby
 #  (dzienny budżet tokenów danej roli: `daily_tokens` w sekcji `roles`)
 # -------------------------------------------------------------------------------------
