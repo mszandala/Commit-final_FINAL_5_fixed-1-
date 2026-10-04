@@ -15,9 +15,13 @@ export default function Dashboard({ config, configOpen, onOpenConfig, onLeaveCon
   const [tab, setTab] = useState('logs')
   // Query or filters the dashboard opened the log with; picking the tab by hand starts it clean.
   const [logsView, setLogsView] = useState(undefined)
+  // Once opened, the Tests tab stays mounted (hidden on other tabs), so a run keeps polling and the
+  // log keeps getting its turns while someone watches another tab.
+  const [testsOpened, setTestsOpened] = useState(false)
   const show = (id, view) => {
     setLogsView(view)
     setTab(id)
+    if (id === 'tests') setTestsOpened(true)
   }
 
   return (
@@ -52,7 +56,11 @@ export default function Dashboard({ config, configOpen, onOpenConfig, onLeaveCon
         {tab === 'logs' && <Logs initial={logsView} />}
         {tab === 'dashboard' && <Overview onOpenLogs={(view) => show('logs', view)} />}
         {tab === 'report' && <Report config={config} />}
-        {tab === 'tests' && <Tests onOpenLogs={(view) => show('logs', view)} />}
+        {testsOpened && (
+          <div className={tab === 'tests' ? 'h-full' : 'hidden'}>
+            <Tests onOpenLogs={(view) => show('logs', view)} />
+          </div>
+        )}
       </div>
     </section>
   )

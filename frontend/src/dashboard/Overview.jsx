@@ -13,6 +13,8 @@ const PURPOSES = {
   chat: { label: 'Chatbot', color: 'bg-navy' },
   company_policy_classifier: { label: 'Policy classifier', color: 'bg-blue' },
   pii_judge: { label: 'PII judge', color: 'bg-teal' },
+  intent_classifier: { label: 'Intent classifier', color: 'bg-blue-light' },
+  refusal_judge: { label: 'Refusal judge', color: 'bg-grey' },
 }
 const OTHER_PURPOSE = { color: 'bg-grey' }
 const LOCAL_CHECKS = {
@@ -345,100 +347,105 @@ export default function Overview({ onOpenLogs }) {
 
             <Panel title="Security layer time" wide>
               {allTime > 0 ? (
-                <div className="grid grid-cols-2 grid-rows-[auto_auto_1fr] gap-x-8">
-                  <p className="col-start-1 row-start-1 flex items-baseline gap-2 self-baseline">
-                    <span className="text-2xl font-semibold">{percent(securityTime, allTime)}</span>
-                    <span className="text-sm text-grey">
-                      of turn time, {formatNumber(securityTime / events.length)} ms of a{' '}
-                      {formatNumber(allTime / events.length)} ms turn on average
-                    </span>
-                  </p>
-                  <div className="col-start-1 row-start-2">
-                    <ShareBar
-                      parts={stats.time.map((t) => ({
-                        id: t.id,
-                        value: t.total,
-                        color: group(t.id).color,
-                        title: `${group(t.id).label}: ${formatNumber(t.total / events.length)} ms per turn`,
-                      }))}
-                    />
-                  </div>
-                  <table className="col-start-1 row-start-3 w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
-                    <thead>
-                      <tr>
-                        <th className={`${TH} text-left`}>Spent on</th>
-                        <th className={`${TH} text-right`} title="Median, over the turns it ran in">
-                          p50
-                        </th>
-                        <th className={`${TH} text-right`} title="95th percentile, over the turns it ran in">
-                          p95
-                        </th>
-                        <th className={`${TH} text-right`}>Slowest</th>
-                        <th className={`${TH} text-right`}>Share</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stats.time.map((t) => (
-                        <tr key={t.id}>
-                          <td className={TD} title={group(t.id).hint}>
-                            <span className="flex items-center gap-1.5">
-                              <span className={`size-2 rounded-full ${group(t.id).color}`} />
-                              {group(t.id).label}
-                            </span>
-                          </td>
-                          <td className={`${NUM}`}>{formatNumber(t.p50)} ms</td>
-                          <td className={`${NUM}`}>{formatNumber(t.p95)} ms</td>
-                          <td className={`${NUM}`}>{formatNumber(t.slowest)} ms</td>
-                          <td className={`${NUM}`}>{percent(t.total, allTime)}</td>
+                // Two columns while the breakdown table fits in half the panel (it needs about 24rem);
+                // narrower, the last turns go below it instead of running into it.
+                <div className="@container">
+                  <div className="grid gap-x-8 @min-[52rem]:grid-cols-2 @min-[52rem]:grid-rows-[auto_auto_1fr]">
+                    <p className="col-start-1 row-start-1 flex items-baseline gap-2 self-baseline">
+                      <span className="text-2xl font-semibold">{percent(securityTime, allTime)}</span>
+                      <span className="text-sm text-grey">
+                        of turn time, {formatNumber(securityTime / events.length)} ms of a{' '}
+                        {formatNumber(allTime / events.length)} ms turn on average
+                      </span>
+                    </p>
+                    <div className="col-start-1 row-start-2">
+                      <ShareBar
+                        parts={stats.time.map((t) => ({
+                          id: t.id,
+                          value: t.total,
+                          color: group(t.id).color,
+                          title: `${group(t.id).label}: ${formatNumber(t.total / events.length)} ms per turn`,
+                        }))}
+                      />
+                    </div>
+                    <table className="col-start-1 row-start-3 w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
+                      <thead>
+                        <tr>
+                          <th className={`${TH} text-left`}>Spent on</th>
+                          <th className={`${TH} text-right`} title="Median, over the turns it ran in">
+                            p50
+                          </th>
+                          <th className={`${TH} text-right`} title="95th percentile, over the turns it ran in">
+                            p95
+                          </th>
+                          <th className={`${TH} text-right`}>Slowest</th>
+                          <th className={`${TH} text-right`}>Share</th>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="font-medium">
-                      <tr>
-                        <td className={`${TD} border-t border-b-0`}>Whole turn</td>
-                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p50)} ms</td>
-                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p95)} ms</td>
-                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.slowest)} ms</td>
-                        <td className={`${TD} border-t border-b-0`} />
-                      </tr>
-                    </tfoot>
-                  </table>
-                  {/* The turns take the breakdown's height without adding to it: from the headline's top
-                      to the last table row, whose text the last turn's text shares a baseline with (the
-                      table's 20px lines sit 2px lower than these 16px ones). Each turn sits at the foot
-                      of an equal slot, so a short log still fills from the top at the same pitch. */}
-                  <div className="relative col-start-2 row-span-3 row-start-1">
-                    <div className="absolute inset-x-0 top-0 bottom-[calc(var(--cell)+2px)] flex flex-col">
-                      <h3 className="px-1.5 text-[13px] text-grey">Last {RECENT_TURNS} turns</h3>
-                      <div
-                        className="grid flex-1"
-                        style={{ gridTemplateRows: `repeat(${RECENT_TURNS}, minmax(0, 1fr))` }}
-                      >
-                        {stats.turns.map((t) => {
-                          const timed = t.parts.reduce((sum, p) => sum + p.ms, 0)
-                          return (
-                            <button
-                              key={t.id}
-                              onClick={() => onOpenLogs({ query: `id:${t.id}` })}
-                              title={`Open the log: id:${t.id}`}
-                              className="grid w-full grid-cols-[4.5rem_1fr_5rem] items-center gap-3 self-end rounded-sm px-1.5 text-left text-sm/4 tabular-nums hover:bg-blue-light/30"
-                            >
-                              <span className="text-grey">{timeOf(t.time)}</span>
-                              <span className="flex h-2.5" style={{ width: `${(t.latencyMs / slowestTurn) * 100}%` }}>
-                                {/* The white right border is the 2px gap, so segments keep their true widths. */}
-                                {t.parts.map((p, i) => (
-                                  <span
-                                    key={i}
-                                    title={`${group(p.group).label}: ${formatNumber(p.ms)} ms`}
-                                    className={`h-full border-r-2 border-white last:rounded-r-sm last:border-r-0 ${group(p.group).color}`}
-                                    style={{ width: `${(p.ms / timed) * 100}%` }}
-                                  />
-                                ))}
+                      </thead>
+                      <tbody>
+                        {stats.time.map((t) => (
+                          <tr key={t.id}>
+                            <td className={TD} title={group(t.id).hint}>
+                              <span className="flex items-center gap-1.5">
+                                <span className={`size-2 rounded-full ${group(t.id).color}`} />
+                                {group(t.id).label}
                               </span>
-                              <span className="text-right">{formatNumber(t.latencyMs)} ms</span>
-                            </button>
-                          )
-                        })}
+                            </td>
+                            <td className={`${NUM}`}>{formatNumber(t.p50)} ms</td>
+                            <td className={`${NUM}`}>{formatNumber(t.p95)} ms</td>
+                            <td className={`${NUM}`}>{formatNumber(t.slowest)} ms</td>
+                            <td className={`${NUM}`}>{percent(t.total, allTime)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="font-medium">
+                        <tr>
+                          <td className={`${TD} border-t border-b-0`}>Whole turn</td>
+                          <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p50)} ms</td>
+                          <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p95)} ms</td>
+                          <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.slowest)} ms</td>
+                          <td className={`${TD} border-t border-b-0`} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                    {/* The turns take the breakdown's height without adding to it: from the headline's top
+                        to the last table row, whose text the last turn's text shares a baseline with (the
+                        table's 20px lines sit 2px lower than these 16px ones). Each turn sits at the foot
+                        of an equal slot, so a short log still fills from the top at the same pitch. Stacked
+                        below the table, they take their own height. */}
+                    <div className="relative mt-(--gap) @min-[52rem]:col-start-2 @min-[52rem]:row-span-3 @min-[52rem]:row-start-1 @min-[52rem]:mt-0">
+                      <div className="flex flex-col @min-[52rem]:absolute @min-[52rem]:inset-x-0 @min-[52rem]:top-0 @min-[52rem]:bottom-[calc(var(--cell)+2px)]">
+                        <h3 className="px-1.5 text-[13px] text-grey">Last {RECENT_TURNS} turns</h3>
+                        <div
+                          className="grid flex-1 @min-[52rem]:grid-rows-(--slots)"
+                          style={{ '--slots': `repeat(${RECENT_TURNS}, minmax(0, 1fr))` }}
+                        >
+                          {stats.turns.map((t) => {
+                            const timed = t.parts.reduce((sum, p) => sum + p.ms, 0)
+                            return (
+                              <button
+                                key={t.id}
+                                onClick={() => onOpenLogs({ query: `id:${t.id}` })}
+                                title={`Open the log: id:${t.id}`}
+                                className="grid w-full grid-cols-[4.5rem_1fr_5rem] items-center gap-3 self-end rounded-sm px-1.5 py-1 text-left text-sm/4 tabular-nums hover:bg-blue-light/30 @min-[52rem]:py-0"
+                              >
+                                <span className="text-grey">{timeOf(t.time)}</span>
+                                <span className="flex h-2.5" style={{ width: `${(t.latencyMs / slowestTurn) * 100}%` }}>
+                                  {/* The white right border is the 2px gap, so segments keep their true widths. */}
+                                  {t.parts.map((p, i) => (
+                                    <span
+                                      key={i}
+                                      title={`${group(p.group).label}: ${formatNumber(p.ms)} ms`}
+                                      className={`h-full border-r-2 border-white last:rounded-r-sm last:border-r-0 ${group(p.group).color}`}
+                                      style={{ width: `${(p.ms / timed) * 100}%` }}
+                                    />
+                                  ))}
+                                </span>
+                                <span className="text-right">{formatNumber(t.latencyMs)} ms</span>
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>
