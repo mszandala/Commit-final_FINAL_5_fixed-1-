@@ -10,7 +10,7 @@ import { parse, test } from 'liqe'
 // that made a turn match.
 
 // Lowercase and drop accents. "ł" has no decomposed form, so it is mapped by hand.
-const fold = (s) =>
+export const fold = (s) =>
   String(s ?? '')
     .toLowerCase()
     .normalize('NFD')

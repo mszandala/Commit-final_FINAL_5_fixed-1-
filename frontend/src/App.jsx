@@ -122,7 +122,7 @@ export default function App() {
           <Chat people={loaded.people} />
         </div>
         <div className="min-w-0 flex-1">
-          <Dashboard configOpen={configOpen} onOpenConfig={() => setConfigOpen(true)} onLeaveConfig={leaveConfig} />
+          <Dashboard config={saved} configOpen={configOpen} onOpenConfig={() => setConfigOpen(true)} onLeaveConfig={leaveConfig} />
         </div>
         {/* Covers both panes below their headers; the panes stay mounted so chat and tabs keep their state. */}
         {configOpen && (

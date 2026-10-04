@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import Logs from './Logs'
 import Overview from './Overview'
+import Report from './Report'
 
 const TABS = [
   { id: 'logs', label: 'Logs' },
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'report', label: 'Report' },
 ]
 
-export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
+export default function Dashboard({ config, configOpen, onOpenConfig, onLeaveConfig }) {
   const [tab, setTab] = useState('logs')
   // Query or filters the dashboard opened the log with; picking the tab by hand starts it clean.
   const [logsView, setLogsView] = useState(undefined)
@@ -45,7 +47,9 @@ export default function Dashboard({ configOpen, onOpenConfig, onLeaveConfig }) {
         </button>
       </header>
       <div role="tabpanel" className="min-h-0 flex-1">
-        {tab === 'logs' ? <Logs initial={logsView} /> : <Overview onOpenLogs={(view) => show('logs', view)} />}
+        {tab === 'logs' && <Logs initial={logsView} />}
+        {tab === 'dashboard' && <Overview onOpenLogs={(view) => show('logs', view)} />}
+        {tab === 'report' && <Report config={config} />}
       </div>
     </section>
   )

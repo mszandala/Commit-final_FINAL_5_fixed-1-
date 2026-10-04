@@ -2,14 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber, formatUsd } from '../format'
 import { useMeta } from '../meta'
+import { controlCounts, isBlocked, isHidden, isRefused, percentile } from './turns'
 
 // Answers "are we safe and what does it cost?" from the events the log already holds. Controls,
 // turns and users open the log on the turns behind them.
-
-// A turn graded block by a failed model call is an error, not a block.
-const isBlocked = (e) => e.level === 'block' && e.decision !== 'Error'
-const isRefused = (e) => e.steps.some((s) => s.kind === 'refusal')
-const isHidden = (e) => e.hidden.length > 0
 
 // Model calls by who made them: the chatbot, or the layer's own checks. Colours follow the
 // purpose, so a missing one never repaints the others.
@@ -39,12 +35,6 @@ const timeGroup = (s) =>
           ? 'pii_judge'
           : 'local'
 const RECENT_TURNS = 10
-
-// Nearest-rank percentile: the smallest value at least `p`% of the values are at or below.
-const percentile = (values, p) => {
-  const sorted = [...values].sort((a, b) => a - b)
-  return sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)] ?? 0
-}
 
 // Spacing in px, [loosest, normal, tightest]. The page loosens or squeezes between them to end on
 // the line of the chat's message box (the same 20px from the bottom).
@@ -111,14 +101,11 @@ const LEVEL_NAMES = { block: 'Blocked', warn: 'Warning' }
 const percent = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}%` : '0%')
 
 function summarize(events) {
-  // Turns where each check flagged or blocked something, at that check's worst level in the turn.
-  const controls = {}
   const purposes = {}
   const users = {}
   const time = {}
   const turns = []
   for (const e of events) {
-    const worst = {}
     // Consecutive steps of one group become one segment of the turn's bar.
     const parts = []
     const spent = {}
@@ -135,11 +122,6 @@ function summarize(events) {
         p.tokens += s.details.tokens ?? 0
         p.cost += s.details.cost ?? 0
       }
-      if (s.level !== 'info' && s.kind !== 'error') worst[s.kind] = worst[s.kind] === 'block' ? 'block' : s.level
-    }
-    for (const [kind, level] of Object.entries(worst)) {
-      const c = (controls[kind] ??= { kind, block: 0, warn: 0 })
-      c[level]++
     }
     for (const [group, ms] of Object.entries(spent)) {
       const t = (time[group] ??= { id: group, total: 0, samples: [] })
@@ -163,7 +145,7 @@ function summarize(events) {
     slowest: Math.max(0, ...samples),
   })
   return {
-    controls: Object.values(controls).sort((a, b) => b.block + b.warn - (a.block + a.warn) || b.block - a.block),
+    controls: controlCounts(events),
     purposes: Object.entries(purposes)
       .map(([id, p]) => ({ id, ...p }))
       .sort(chatFirst('cost')),
@@ -341,7 +323,7 @@ export default function Overview({ onOpenLogs }) {
                       {stats.purposes.map((p) => (
                         <tr key={p.id}>
                           <td className={TD}>
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5">
                               <span className={`size-2 rounded-full ${purpose(p.id).color}`} />
                               {purpose(p.id).label}
                             </span>
@@ -397,7 +379,7 @@ export default function Overview({ onOpenLogs }) {
                       {stats.time.map((t) => (
                         <tr key={t.id}>
                           <td className={TD} title={group(t.id).hint}>
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5">
                               <span className={`size-2 rounded-full ${group(t.id).color}`} />
                               {group(t.id).label}
                             </span>
