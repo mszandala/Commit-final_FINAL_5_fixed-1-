@@ -144,11 +144,30 @@ const tags = (ast) =>
       ? [ast]
       : [ast.left, ast.right, ast.operand, ast.expression].flatMap(tags)
 
-// liqe accepts any field name and an empty value, and then quietly matches nothing.
+// liqe's own reading of /pattern/flags.
+function regexError(value) {
+  const m = /(\/?)(.+)\1([a-z]*)/.exec(value)
+  try {
+    if (!m) throw new Error()
+    if (m[1]) new RegExp(m[2], m[3])
+    else new RegExp(value)
+  } catch {
+    return `Invalid regular expression ${value}`
+  }
+  return null
+}
+
+// liqe accepts any field name and an empty value, and then quietly matches nothing. A bad regex
+// or a word after > or < only fails while matching, which would take the whole page down.
 function check(tag) {
-  if (tag.field.type !== 'Field') return null
-  if (!FIELDS.includes(tag.field.name)) return `Unknown field "${tag.field.name}"`
-  if (tag.expression.type === 'EmptyExpression') return `Add a value after "${tag.field.name}:"`
+  const { type, value } = tag.expression
+  if (tag.field.type === 'Field') {
+    if (!FIELDS.includes(tag.field.name)) return `Unknown field "${tag.field.name}"`
+    if (type === 'EmptyExpression') return `Add a value after "${tag.field.name}:"`
+  }
+  if (type === 'RegexExpression') return regexError(value)
+  const op = tag.operator?.operator ?? ':'
+  if (/[<>]/.test(op) && typeof value !== 'number') return `Use a number after "${op.slice(1)}"`
   return null
 }
 
@@ -172,8 +191,16 @@ export function advancedMatcher(query, meta) {
     const exact = NUMBER_FIELDS.includes(tag.field.name) && typeof tag.expression.value === 'number'
     if (exact && tag.operator.operator === ':') tag.operator.operator = ':='
   }
+  // Anything the checks above miss counts as no match rather than an error thrown during render.
+  const safeTest = (fields) => {
+    try {
+      return test(ast, fields)
+    } catch {
+      return false
+    }
+  }
   return {
-    match: (e) => test(ast, turnRow(e, meta).fields),
-    matchStep: (e, s) => test(ast, { ...turnRow(e, meta).fields, ...stepRow(s, meta).fields }),
+    match: (e) => safeTest(turnRow(e, meta).fields),
+    matchStep: (e, s) => safeTest({ ...turnRow(e, meta).fields, ...stepRow(s, meta).fields }),
   }
 }

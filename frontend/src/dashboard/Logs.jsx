@@ -337,7 +337,7 @@ export default function Logs({ initial = {} }) {
                         {e.control || <span className="text-grey">&ndash;</span>}
                       </td>
                       <td className="border-b border-line px-2.5 py-1 text-grey">
-                        <div className="line-clamp-2 max-w-60" title={e.reason}>
+                        <div className="line-clamp-2 min-w-36 max-w-60 [overflow-wrap:anywhere]" title={e.reason}>
                           {e.reason}
                         </div>
                       </td>

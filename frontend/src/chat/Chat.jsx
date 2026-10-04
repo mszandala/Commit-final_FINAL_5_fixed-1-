@@ -63,7 +63,8 @@ export default function Chat({ people }) {
     setFailed(null)
   }
 
-  async function send(text) {
+  // `resumed`: already retried in a new conversation after the backend forgot the old one.
+  async function send(text, resumed = false) {
     setFailed(null)
     const tools = []
     setPending({ stage: '', tools })
@@ -79,8 +80,18 @@ export default function Chat({ people }) {
       setBudgets((prev) => ({ ...prev, [roleId]: result.budget }))
       setItems((prev) => [...prev, { id: nextId++, kind: 'reply', ...result }])
     } catch (e) {
+      // A restarted backend no longer knows the conversation: start a new session and send again.
+      if (e.status === 404 && conversation.current && !resumed) {
+        conversation.current = null
+        setItems((prev) => {
+          const at = prev.findLastIndex((item) => item.kind === 'user')
+          const divider = { id: nextId++, kind: 'session', name: person.user, role: person.label }
+          return [...prev.slice(0, at), divider, ...prev.slice(at)]
+        })
+        return await send(text, true)
+      }
       // status 0: the request never got an answer.
-      setFailed({ text, status: e.status ?? 0 })
+      setFailed({ text, status: e.status ?? 0, detail: e.message })
     } finally {
       setPending(null)
       refreshEvents()
@@ -140,7 +151,7 @@ export default function Chat({ people }) {
           <ChatItem key={item.id} item={item} />
         ))}
         {pending && <ChatItem item={{ kind: 'pending', ...pending }} />}
-        {failed && <ChatItem item={{ kind: 'error', status: failed.status }} onRetry={() => send(failed.text)} />}
+        {failed && <ChatItem item={{ kind: 'error', ...failed }} onRetry={() => send(failed.text)} />}
       </div>
 
       <footer className="shrink-0 space-y-2.5 border-t border-line px-5 pt-3 pb-5">
