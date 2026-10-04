@@ -33,9 +33,13 @@ export default function ChatItem({ item, onRetry }) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-1.5">
-        {item.files.map((file, i) => (
-          <Attachment key={`${file.name}-${i}`} file={file} />
-        ))}
+        {item.files.length > 0 && (
+          <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+            {item.files.map((file, i) => (
+              <Attachment key={i} file={{ ...file, status: 'done' }} />
+            ))}
+          </div>
+        )}
         {item.text && (
           <p className="max-w-[85%] cursor-text whitespace-pre-wrap rounded-md bg-blue-light/35 px-3.5 py-2">{item.text}</p>
         )}

@@ -25,8 +25,12 @@ class ToolCall(ApiModel):
     tool: str
     args: dict[str, Any] = Field(description="Argumenty w postaci, w jakiej wysłał je model (zamaskowane)")
     allowed: bool
-    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist albo code_guard")
+    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist, code_guard, "
+                                                   "company_policies albo budget")
     reason: Optional[str] = None
+    tokens: Optional[int] = Field(None, description="Tokeny zużyte w trakcie wywołania (np. przez subagenta)")
+    cost: Optional[float] = Field(None, description="Koszt wywołania w dolarach")
+    result_tokens: Optional[int] = Field(None, description="Szacunek, ile tokenów wynik dokłada do kontekstu modelu")
 
 
 class Budget(ApiModel):
@@ -128,6 +132,7 @@ class Meta(ApiModel):
     zones: dict[str, str] = Field(description="Strefa kroku -> nazwa dla ludzi")
     stages: dict[str, str] = Field(description="Etap tury (zdarzenie stage w strumieniu) -> nazwa dla ludzi")
     examples: list[str]
+    max_prompt_chars: int = Field(description="MAX_PROMPT_CHARS: dłuższy prompt blokuje kontrola prompt_length")
 
 
 # --- log -------------------------------------------------------------------------------------
@@ -228,6 +233,7 @@ class Stats(ApiModel):
 
 
 class Health(ApiModel):
-    status: str
+    status: str = Field(description='"ok" albo "degraded", gdy konfiguracja nie pozwala wołać modelu')
     provider: str
     model: str
+    problem: Optional[str] = Field(None, description="Co jest nie tak z konfiguracją; null, gdy wszystko w porządku")

@@ -7,13 +7,16 @@ from collections import Counter
 from typing import Optional
 
 from config import CONTROLS
+from security.intent_classifier import CATEGORIES as INTENT_CATEGORIES
 from security.refusal_detector import CATEGORIES as REFUSAL_CATEGORIES
 
 LEVELS = ["info", "warn", "block"]
 
 # Rodzaje kroków (pole `kind`) i ich nazwy dla ludzi.
 STEP_KINDS = {
+    "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
+    "intent":         "Intent check",
     "company_policy": "Company policy",
     "prompt_masking": "Prompt masking",
     "pii_judge":      "PII judge",
@@ -21,6 +24,7 @@ STEP_KINDS = {
     "tool_call":      "Tool call",
     "output_filter":  "Reply filter",
     "refusal":        "Chatbot refusal",
+    "retry":          "Retry",
     "budget":         "Budget",
     "error":          "Error",
 }
@@ -33,7 +37,9 @@ ZONES = {
 
 _KIND_OF = {"llm_call": "model_call"}
 _POLICY_POINTS = {"input": "Prompt", "tool": "Tool arguments", "retrieval": "Tool result", "output": "Reply"}
-_PURPOSES = {"chat": "chatbot", "pii_judge": "PII judge", "company_policy_classifier": "policy classifier"}
+_PURPOSES = {"chat": "chatbot", "pii_judge": "PII judge", "pii_reply_judge": "PII reply judge",
+             "company_policy_classifier": "policy classifier", "intent_classifier": "intent classifier",
+             "refusal_judge": "refusal verifier"}
 
 
 def _counted(types: list) -> str:
@@ -52,6 +58,16 @@ def _prompt_guard(e: dict) -> tuple[str, str]:
     if e.get("decision") == "warn":
         return "warn", e.get("reason") or "Prompt flagged"
     return "info", "Prompt matches the role"
+
+
+def _intent(e: dict) -> tuple[str, str]:
+    if e.get("error"):
+        return "warn", f"Intent classifier gave no answer ({e['error']}); the keyword guard's decision stands"
+    category = e.get("category")
+    if category == "in_scope":
+        return "info", "The request is within the role's scope"
+    # Powód (po polsku, jak inne decyzje strażników) zaczyna się już od nazwy kategorii.
+    return ("block" if e.get("blocked") else "warn"), e.get("reason") or INTENT_CATEGORIES.get(category, category)
 
 
 def _company_policy(e: dict) -> tuple[str, str]:
@@ -110,11 +126,17 @@ def _tool_call(e: dict) -> tuple[str, str]:
         control = CONTROLS.get(e.get("stage"), e.get("stage") or "security layer")
         reason = f": {e['reason']}" if e.get("reason") else ""
         return "block", f"{call} rejected by {control}{reason}"
+    # Koszt wywołania: wynik dokładany do kontekstu modelu i to, co narzędzie samo zużyło (subagent).
+    size = f"; result about {e['result_tokens']} tokens" if e.get("result_tokens") is not None else ""
+    if e.get("tokens"):
+        size += f", the call itself used {e['tokens']} tokens (${e.get('cost', 0):.4f})"
+    if e.get("truncated_chars"):
+        size += f", cut by {e['truncated_chars']} characters"
     stats = {k: v for k, v in (e.get("masked") or {}).items() if v}
     if stats:
         hidden = ", ".join(f"{v} {k}" for k, v in stats.items())
-        return "warn", f"{call} ran; before reaching the model: {hidden}"
-    return "info", f"{call} ran; nothing to hide in the result"
+        return "warn", f"{call} ran; before reaching the model: {hidden}{size}"
+    return ("warn" if e.get("truncated_chars") else "info"), f"{call} ran; nothing to hide in the result{size}"
 
 
 def _output_filter(e: dict) -> tuple[str, str]:
@@ -129,7 +151,9 @@ def _output_filter(e: dict) -> tuple[str, str]:
         parts.append(f"restored for the user: {_counted(e['restored'])}")
     if e.get("exempt"):
         parts.append(f"public or typed by the user: {_counted(e['exempt'])}")
-    level = "warn" if e.get("redacted") or e.get("found") else "info"
+    if e.get("tool_names_hidden"):
+        parts.append(f"internal tool names removed: {e['tool_names_hidden']}")
+    level = "warn" if e.get("redacted") or e.get("found") or e.get("tool_names_hidden") else "info"
     text = "; ".join(parts)
     return level, (text[0].upper() + text[1:]) if text else "Nothing to hide in the reply"
 
@@ -137,12 +161,18 @@ def _output_filter(e: dict) -> tuple[str, str]:
 def _refusal(e: dict) -> tuple[str, str]:
     cause = (f"after rejected tool: {', '.join(e['after_denied_tools'])}" if e.get("after_denied_tools")
              else REFUSAL_CATEGORIES.get(e.get("category"), e.get("category")))
+    if e.get("confirmed") is False:
+        return "info", f"The reply looked like a refusal, but the verifier judged it an answer: {e.get('reason')}"
+    if e.get("method") == "llm":
+        return "warn", f"The chatbot declined the request ({cause}); confirmed by the verifier: {e.get('reason')}"
     how = "keywords" if e.get("method") == "keywords" else f"similarity to known refusals {e.get('score')}"
     return "warn", f"The chatbot declined the request ({cause}); detected by {how}"
 
 
 _DESCRIBE = {
+    "prompt_length": lambda e: ("block", f"Prompt has {e.get('chars')} characters; the limit is {e.get('limit')}"),
     "prompt_guard": _prompt_guard,
+    "intent": _intent,
     "company_policy": _company_policy,
     "prompt_masking": _prompt_masking,
     "pii_judge": _pii_judge,
@@ -150,6 +180,7 @@ _DESCRIBE = {
     "tool_call": _tool_call,
     "output_filter": _output_filter,
     "refusal": _refusal,
+    "retry": lambda e: ("warn", f"The model's reply was discarded and requested again: {e.get('reason')}"),
     "budget": lambda e: ("block", e.get("reason") or "Budget exhausted"),
     "error": lambda e: ("block", f"Model call failed: {e.get('error')}"),
 }

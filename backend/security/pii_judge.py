@@ -7,6 +7,7 @@ from chatbot import llm_client
 from config import ROLES
 
 _PROMPT = (Path(__file__).parent / "prompts" / "pii_judge.txt").read_text(encoding="utf-8")
+_REPLY_PROMPT = (Path(__file__).parent / "prompts" / "pii_reply_judge.txt").read_text(encoding="utf-8")
 
 
 def judge_entities(role: str, prompt: str, entities: list[dict]) -> list[str]:
@@ -46,6 +47,43 @@ def judge_entities(role: str, prompt: str, entities: list[dict]) -> list[str]:
         reasons = [r.replace(e["text"], f"[{e['type']}]") for r in reasons]
     audit.record(
         "pii_judge", "security",
+        decisions=[{"type": e["type"], "decision": d, "reason": r} for e, d, r in zip(entities, decisions, reasons)],
+        error=error,
+    )
+    return decisions
+
+
+def judge_reply_entities(role: str, reply: str, entities: list[dict]) -> list[str]:
+    """Dla każdej encji z odpowiedzi chatbota: "hide" (dane osobowe konkretnej osoby) albo "keep".
+
+    Detektor oznacza jako osoby i kwoty także zwykłe wyrażenia ("Masa Księżyca", nazwę stanowiska,
+    liczbę w obliczeniach). Sędzia odsiewa takie pomyłki; każda wątpliwość i każdy błąd to "hide".
+    """
+    if not entities:
+        return []
+    listing = "\n".join(f'{i}. {e["type"]}: "{e["text"]}"' for i, e in enumerate(entities, 1))
+    message = _REPLY_PROMPT.format(role=role, role_description=ROLES.get(role, {}).get("description", ""),
+                                   reply=reply, entities=listing)
+    decisions = ["hide"] * len(entities)
+    reasons = [""] * len(entities)
+    try:
+        answer = llm_client.chat([{"role": "user", "content": message}], zone="security", purpose="pii_reply_judge")
+        match = re.search(r"\{.*\}", answer.content or "", re.DOTALL)
+        parsed = json.loads(match.group(0)) if match else {}
+        for i in range(len(entities)):
+            item = parsed.get(str(i + 1), "")
+            if isinstance(item, dict):
+                reasons[i] = str(item.get("reason", ""))[:200]
+                item = item.get("decision", "")
+            if str(item).strip().lower() == "keep":
+                decisions[i] = "keep"
+        error = None
+    except Exception as exc:
+        error = type(exc).__name__
+    for e in entities:
+        reasons = [r.replace(e["text"], f"[{e['type']}]") for r in reasons]
+    audit.record(
+        "pii_judge", "security", target="reply",
         decisions=[{"type": e["type"], "decision": d, "reason": r} for e, d, r in zip(entities, decisions, reasons)],
         error=error,
     )

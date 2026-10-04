@@ -39,7 +39,10 @@ PII_JUDGE_ENABLED = os.getenv("PII_JUDGE_ENABLED", "true").lower() == "true"
 PSEUDONYM_KEY = os.getenv("PSEUDONYM_KEY", "")
 
 # Tryb strażnika promptu: "warn" (ostrzega i przepuszcza) albo "block" (zatrzymuje zapytanie)
-PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "warn")
+PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "block")
+# Klasyfikator intencji (LLM, strefa bezpieczeństwa): czy zapytanie mieści się w pracy roli.
+# Włączony rozstrzyga zamiast słów kluczowych strażnika; wyłączony = decyduje sam strażnik regex.
+INTENT_CLASSIFIER_ENABLED = os.getenv("INTENT_CLASSIFIER_ENABLED", "true").lower() == "true"
 
 AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
 
@@ -84,13 +87,14 @@ PII_SENSITIVITY_LEVELS = [
 
 # Etapy kontroli (pole `stage` werdyktów i zdarzeń) i ich nazwy dla ludzi.
 CONTROLS = {
+    "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
     "tool_whitelist": "Tool permissions",
     "pii_policy":     "PII policy",
     "code_guard":     "Code guard",
     "company_policies": "Company policy",
     "chatbot_refusal": "Chatbot refusal",
-    "budget":         "Token budget",
+    "budget":         "Budget",
 }
 
 BASE_DIR       = Path(__file__).parent / "data"
@@ -103,6 +107,14 @@ MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
 # Limit wydatków na rolę w dolarach (łącznie, bez dziennego zerowania) i baza, w której są zapisywane.
 MAX_SPENDING = 0.5
+# Najdłuższy prompt użytkownika (w znakach); dłuższy jest odrzucany przed jakimkolwiek wywołaniem modelu.
+MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", "4000"))
+# Limity jednej tury w strefie chatbota (model, wywołania narzędzi, subagent). Po ich przekroczeniu
+# bramka odrzuca kolejne wywołania narzędzi, a model ma odpowiedzieć z tego, co już ma.
+MAX_TURN_TOKENS = int(os.getenv("MAX_TURN_TOKENS", "40000"))
+MAX_TURN_COST = float(os.getenv("MAX_TURN_COST", "0.05"))
+# Najdłuższy wynik narzędzia (w znakach) przekazywany modelowi; dłuższy jest przycinany.
+MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "24000"))
 SPENDING_DB = Path(__file__).parent / "spending.db"
 
 # Moduł regulaminów firmowych (security/company_policies) w przebiegu tury.
@@ -114,6 +126,13 @@ COMPANY_POLICIES_CLASSIFIER = os.getenv("COMPANY_POLICIES_CLASSIFIER", "security
 # wyników spółki), więc domyślnie daje ostrzeżenie zamiast blokady. W prompcie blokuje jak dotąd;
 # znaczniki, wzorce, odciski plików i klasyfikator blokują wszędzie. true = blokuj także tutaj.
 COMPANY_POLICIES_STRICT_KEYWORDS = os.getenv("COMPANY_POLICIES_STRICT_KEYWORDS", "false").lower() == "true"
+# Ocena tematu przez klasyfikator bez twardego dowodu (klauzula, numer umowy, odcisk pliku) myli się
+# zbyt często, żeby sama blokowała: w testach QA zatrzymywała zwykłe pytania jako „cenniki i marże".
+# Domyślnie daje ostrzeżenie; true = blokuj jak w regułach.
+COMPANY_POLICIES_SEMANTIC_BLOCKS = os.getenv("COMPANY_POLICIES_SEMANTIC_BLOCKS", "false").lower() == "true"
+# Gdy klasyfikator jest niedostępny (brak klucza, błąd dostawcy): true = blokuj (fail-closed, jak
+# w regułach), false = ostrzeżenie i sprawdzenie samymi regułami deterministycznymi.
+COMPANY_POLICIES_FAIL_CLOSED = os.getenv("COMPANY_POLICIES_FAIL_CLOSED", "false").lower() == "true"
 
 # Wykrywanie odmowy w odpowiedzi chatbota (security/refusal_detector.py): słowa kluczowe, a gdy nic
 # nie znajdą — podobieństwo zdań do wzorcowych odmów liczone lokalnym modelem embeddingów.
@@ -121,6 +140,9 @@ REFUSAL_DETECTION_ENABLED = os.getenv("REFUSAL_DETECTION_ENABLED", "true").lower
 REFUSAL_EMBEDDINGS_ENABLED = os.getenv("REFUSAL_EMBEDDINGS_ENABLED", "true").lower() == "true"
 REFUSAL_MODEL = os.getenv("REFUSAL_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 REFUSAL_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.5"))
+# Sędzia LLM potwierdza odmowę; słowa kluczowe i podobieństwo (od niższego progu) tylko wskazują kandydata.
+REFUSAL_JUDGE_ENABLED = os.getenv("REFUSAL_JUDGE_ENABLED", "true").lower() == "true"
+REFUSAL_TRIGGER_THRESHOLD = float(os.getenv("REFUSAL_TRIGGER_THRESHOLD", "0.35"))
 
 # Ogólne reguły postępowania dla chatbota (decyzje kadrowe, dyskryminacja itp.). Warstwa nie zmienia
 # promptu systemowego chronionego chatbota — reguły dołącza do pierwszej wiadomości rozmowy.
@@ -128,8 +150,8 @@ CONDUCT_RULES_FILE = Path(__file__).parent / "security" / "rules.txt"
 # Narzędzia pogrupowane po domenach danych (podfoldery data/).
 _GENERIC_TOOLS = ["list_files", "read_file"]
 _PROJECTS  = ["list_projects", "read_project"]
-_HR        = ["read_employee_records"]
-_CLIENTS   = ["read_client_records"]
+_HR        = ["read_employee_records", "summarize_employee_records"]
+_CLIENTS   = ["read_client_records", "summarize_client_records"]
 _CAMPAIGNS = ["read_bank_campaigns"]
 _MARKET    = ["read_stock_prices", "list_earnings_calls", "read_earnings_call"]
 _CODE      = ["run_python"]
@@ -178,6 +200,7 @@ PII_LABELS = {
     "CLIENT-ID":      "Client ID",
     "ACCOUNT-NO":     "Account number",
     "EMPLOYEE-ID":    "Employee ID",
+    "PESEL":          "PESEL",
     "REDACTED":       "Hidden",
 }
 
@@ -258,6 +281,7 @@ CHATBOT_PII_POLICY = {
     "CLIENT-ID":      "redact",
     "ACCOUNT-NO":     "redact",
     "EMPLOYEE-ID":    "redact",
+    "PESEL":          "redact",
     "NAME":           "judge",
     "SALARY":         "judge",
     "ORGANIZATION":   "allow",
@@ -275,9 +299,12 @@ CHATBOT_PII_POLICY = {
 DEFAULT_ROLE_PII_POLICY = {
     "NAME":           "redact",
     "SALARY":         "redact",
-    "ORGANIZATION":   "redact",
-    "LOCATION":       "redact",
-    "PROJECT":        "redact",
+    "PESEL":          "redact",
+    # Nazwy miejsc, organizacji i projektów nie są danymi osobowymi: widzi je każda rola,
+    # niezależnie od `allowed_pii` (ukrywanie ich psuło zwykłe odpowiedzi).
+    "ORGANIZATION":   "allow",
+    "LOCATION":       "allow",
+    "PROJECT":        "allow",
     "CLIENT-ID":      "allow",     # kto ma narzędzie do rekordów, ten widzi ich identyfikatory
     "ACCOUNT-NO":     "allow",
     "EMPLOYEE-ID":    "allow",
@@ -310,6 +337,9 @@ COLUMN_TYPES = {
 TOOL_RESULT_SCAN = {
     "read_client_records":   "columns",
     "read_employee_records": "columns",
+    # statystyki po całym pliku: bez identyfikatorów (grupowanie po nich jest odrzucane w narzędziu)
+    "summarize_client_records":   "none",
+    "summarize_employee_records": "none",
     "read_bank_campaigns":   "none",
     "read_stock_prices":     "none",
     "list_projects":         "none",
