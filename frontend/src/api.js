@@ -28,7 +28,17 @@ export const resetBudget = (roleId) =>
 export const getConfig = () => request('/config')
 export const getConfigDefaults = () => request('/config/defaults')
 export const updateConfig = (update) => request('/config', { method: 'PUT', body: update })
-export const getEvents = () => request('/events?steps=true')
+// The whole log, oldest first. Without afterId the API sends only the newest 200 rows, so this
+// pages through it from the start.
+export async function getEvents() {
+  const PAGE = 1000
+  const rows = []
+  for (;;) {
+    const page = await request(`/events?steps=true&limit=${PAGE}&afterId=${rows.at(-1)?.id ?? 0}`)
+    rows.push(...page)
+    if (page.length < PAGE) return rows
+  }
+}
 export const getComments = (conversationId) => request(`/conversations/${conversationId}/comments`)
 export const addComment = (conversationId, comment) =>
   request(`/conversations/${conversationId}/comments`, { method: 'POST', body: comment })

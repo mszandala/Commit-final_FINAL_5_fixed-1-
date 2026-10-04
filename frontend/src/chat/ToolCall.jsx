@@ -14,8 +14,9 @@ import {
 import { useMeta } from '../meta'
 import StatusTag from '../ui/StatusTag'
 
-// Project files are named owner_repo; people know them by the repo.
-const project = (name) => name.split('_').slice(1).join('_') || name
+// Project files are named owner_repo; people know them by the repo. The backend sends `{}` for
+// arguments the model garbled, so a name can be missing.
+const project = (name = '') => name.split('_').slice(1).join('_') || name
 
 const filtered = (label, { column, value, start_row }) =>
   [label, column && `${column} ${value}`, start_row && `from row ${start_row + 1}`].filter(Boolean).join(', ')
@@ -31,7 +32,7 @@ const TOOLS = {
   read_earnings_call: { icon: Mic, label: () => 'Read earnings call' },
   run_python: { icon: SquareTerminal, label: () => 'Run Python code' },
   create_subagent: { icon: Bot, label: () => 'Hand off to a subagent' },
-  read_file: { icon: FileText, label: (a) => `Read ${a.filename}` },
+  read_file: { icon: FileText, label: (a) => `Read ${a.filename ?? 'a file'}` },
   list_files: { icon: FileText, label: () => 'List files' },
 }
 

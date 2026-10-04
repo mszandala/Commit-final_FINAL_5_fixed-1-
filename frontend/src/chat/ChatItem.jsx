@@ -48,9 +48,12 @@ export default function ChatItem({ item, onRetry }) {
   }
 
   if (item.kind === 'error') {
+    // 0: no answer at all. 502: the backend answered but the model call failed. For anything else
+    // the backend says what went wrong.
+    const title = { 0: 'Cannot reach the server', 502: 'The model call failed' }[item.status] ?? 'The server returned an error'
     return (
-      // 502: the backend answered but the model call failed.
-      <Notice icon={CloudOff} title={item.status === 502 ? 'The model call failed' : 'Cannot reach the server'}>
+      <Notice icon={CloudOff} title={title}>
+        {![0, 502].includes(item.status) && <p className="text-ink">{item.detail}</p>}
         <Button size="sm" icon={RotateCw} onClick={onRetry} className="mt-2">
           Retry
         </Button>

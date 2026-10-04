@@ -38,3 +38,18 @@ body {
     cursor: pointer;
   }
 }
+
+/* Printing shows only the report, which sits outside #root and sets its own margins (Report.jsx).
+   With no page margin there is no room for the browser's date and URL lines either. */
+@media print {
+  @page {
+    margin: 0;
+  }
+  body > :not(.print-report) {
+    display: none !important;
+  }
+  body {
+    background: white;
+    print-color-adjust: exact;
+  }
+}
