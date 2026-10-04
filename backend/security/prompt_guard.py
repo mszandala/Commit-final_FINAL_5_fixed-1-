@@ -5,10 +5,20 @@ from config import RESOURCE_TOOLS, ROLES
 from security.common.roles import normalize_role
 from security.common.verdicts import Verdict
 
+# Wzorzec "polecenie ignorowania": czasownik, do czterech słów dookreślających ("all previous", "wszystkie
+# poprzednie", "o wszystkich") i rzecz, którą się ignoruje. Krótszy wzorzec z jednym słowem dookreślającym
+# nie łapał kanonicznego "ignore all previous instructions" ani polskiego "instrukcje".
+_IGNORE_VERBS = r"(?:ignor\w*|zignoruj\w*|disregard|forget|override|pomi[ńn]\w*|zapomnij|zlekceważ\w*)"
+_MODIFIERS = (r"(?:all|any|every|the|your|of|previous|prior|above|earlier|former|those|these|about|"
+              r"safety|security|system|content|ethical|bezpiecze\w*|systemow\w*|"
+              r"wszystk\w*|wszelk\w*|poprzedni\w*|powyższ\w*|wcześniejsz\w*|dotychczasow\w*|swoje|twoje|moje|o)")
+_TARGETS = (r"(?:instructions?|rules|prompts?|guidelines|directives|constraints|restrictions|"
+            r"instrukcj\w*|zasad\w*|polece\w*|regu[łl]\w*|wytyczn\w*|ogranicze\w*|zabezpiecze\w*)")
+
 # Wzorce znanych ataków (Jailbreak / Prompt Injection)
 INJECTION_PATTERNS = [
     (r"\b(?:dan|do anything now)\b", "Wykryto sygnaturę jailbreak DAN (Do Anything Now)"),
-    (r"(?:ignore|zignoruj)\s+(?:all|previous|wszystkie|poprzednie)?\s*(?:instructions|rules|zasady|polecenia)", "Wykryto próbę ignorowania instrukcji systemowych"),
+    (rf"\b{_IGNORE_VERBS}\s+(?:{_MODIFIERS}\s+){{0,4}}{_TARGETS}", "Wykryto próbę ignorowania instrukcji systemowych"),
     (r"(?:from now on you are|od teraz jesteś|act as|wciel się w)", "Wykryto próbę nadpisania tożsamości / roli modelu"),
     (r"(?:new system directive|system prompt override|---BEGIN RESPONSE---)", "Wykryto próbę wstrzyknięcia dyrektywy systemowej"),
     (r"[A-Za-z0-9+/=]{50,}", "Wykryto potencjalnie zaciemniony ciąg Base64 / Payload"),
