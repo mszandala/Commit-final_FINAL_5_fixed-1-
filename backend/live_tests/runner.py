@@ -259,7 +259,8 @@ def _describe(scenario_id: str, result: pipeline.TurnResult, checks: list, event
         "maskedPrompt": result.masked_prompt,
         "maskedForModel": result.masked_for_model,
         "tools": [{"tool": c["tool"], "allowed": c["allowed"], "stage": c.get("stage")} for c in result.tool_calls],
-        "modelCalls": len(calls),
+        "modelCalls": len(calls),                                             # wszystkie strefy, także strażnicy
+        "chatbotCalls": sum(1 for e in calls if e.get("zone") == "chatbot"),   # 0 = model chatbota nie został wywołany
         "tokens": sum(e.get("tokens", 0) for e in calls),
         "cost": round(sum(e.get("cost", 0) for e in calls), 6),
         "latencyMs": result.latency_ms,

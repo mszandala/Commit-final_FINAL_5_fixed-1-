@@ -149,7 +149,11 @@ function SettingBadges({ config, meta }) {
 // What came out of one turn: checks, what the model received, tool calls, the reply and the cost.
 function ResultFields({ scenario, result, onOpenLogs }) {
   const meta = useMeta()
-  const modelGot = result.modelSaw ?? (result.maskedPrompt !== scenario.prompt ? result.maskedPrompt : '')
+  // A turn stopped before the chatbot (guard, policy, budget) never reached the model: what remains is the prompt
+  // as it was written to the log, so it must not be labelled as what the model got.
+  const neverSent = result.chatbotCalls === 0
+  const loggedPrompt = result.maskedPrompt !== scenario.prompt ? result.maskedPrompt : ''
+  const modelGot = neverSent ? '' : (result.modelSaw ?? loggedPrompt)
   return (
     <>
       <Field label="Checks">
@@ -169,6 +173,16 @@ function ResultFields({ scenario, result, onOpenLogs }) {
         </ul>
       </Field>
       {result.reason && <Field label="Reason">{result.reason}</Field>}
+      {neverSent && (
+        <Field label="Model">
+          <span className="text-grey">Not called: the request was stopped before it reached the model.</span>
+        </Field>
+      )}
+      {neverSent && loggedPrompt && (
+        <Field label="Prompt in log">
+          <span className="whitespace-pre-wrap break-words font-mono text-[12.5px]">{loggedPrompt}</span>
+        </Field>
+      )}
       {modelGot && (
         <Field label="Model got">
           <span className="whitespace-pre-wrap break-words font-mono text-[12.5px]">{modelGot}</span>
