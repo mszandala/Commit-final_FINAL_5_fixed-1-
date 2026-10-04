@@ -166,7 +166,13 @@ class Vault:
         return self._substitute(text, replace), stats
 
     def token_spans(self, text: str) -> list[tuple[int, int]]:
-        return [m.span() for p in (_TOKEN_RE, _PSEUDONYM_RE) for m in p.finditer(text)]
+        """Fragmenty tekstu, które są znacznikami z TEGO sejfu (np. <EMAIL_1>), i dlatego nie są wykrywane jako PII.
+
+        Tylko znane znaczniki: wyrażenie na znacznik jest tolerancyjne (<email 1>, [EMAIL-1], (EMAIL 1)), więc
+        pasuje także do "(PESEL 89010212345)" albo "[tel 601234567]". Gdyby każde dopasowanie wykluczało detekcję,
+        dane osobowe zapisane w takim nawiasie omijałyby filtr odpowiedzi."""
+        return [m.span() for pattern, pseudonym in ((_TOKEN_RE, False), (_PSEUDONYM_RE, True))
+                for m in pattern.finditer(text) if self._resolve(m, pseudonym) is not None]
 
 
 def mask_csv(text: str, column_types: dict, policy: dict, vault: Vault) -> tuple[str, dict]:

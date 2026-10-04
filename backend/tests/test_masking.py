@@ -128,3 +128,30 @@ def test_sanitize_paths():
     assert root not in out and "/home/user" not in out and "<PATH>" in out
     trace = 'Traceback (most recent call last):\n  File "a.py", line 1, in <module>\nValueError: zły plik'
     assert sanitize_paths(trace) == "[stack trace removed]\nValueError: zły plik"
+
+
+# --- znaczniki a detekcja: nawias z etykietą i cyframi nie jest znacznikiem z sejfu ----------------
+
+def test_only_known_tokens_hide_text_from_detection():
+    vault = Vault()
+    token = vault.token_for("EMAIL", "jan.kowalski@firma.pl")             # <EMAIL_1>
+    assert vault.token_spans(f"adres {token}") == [(6, 6 + len(token))]
+    for text in ("(PESEL 89010212345)", "[PESEL 89010212345]", "<PESEL 89010212345>", "(tel 601234567)",
+                 "<EMAIL_9>"):                                           # nieznany znacznik to zwykły tekst
+        assert vault.token_spans(text) == [], text
+
+
+def test_pii_in_brackets_is_not_a_way_around_the_reply_filter():
+    """Model (albo atakujący, który mu każe) zapisuje PESEL jako "(PESEL ...)": filtr odpowiedzi ma go ukryć."""
+    from core.pii import filter_output
+    from core.models import Policy
+    from security.pii.regex_detector import detect_regex_pii
+    import pipeline
+
+    def detect(text, threshold=None):
+        return detect_regex_pii(text)
+
+    for written in ("(PESEL 89010212345)", "[PESEL 89010212345]", "PESEL 89010212345"):
+        shown, _, stats = filter_output("podstawowy użytkownik", f"Dane: {written}", policy=pipeline.current_policy(),
+                                        detect=detect)
+        assert "89010212345" not in shown and "PESEL" in stats["redacted"], written
