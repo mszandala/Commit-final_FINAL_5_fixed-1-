@@ -1,20 +1,19 @@
-# AI Control Layer: warstwa bezpieczeństwa (proxy zgodne z OpenAI + panel) i aplikacja demonstracyjna.
+# AI Control Layer: security layer (OpenAI-compatible proxy + dashboard) and demonstration application.
 #
-#   docker compose up -d --build        # interfejs: http://127.0.0.1:8080, API/proxy: http://127.0.0.1:8000
-#   (zajęte porty: API_PORT=18000 UI_PORT=18080 docker compose up -d --build)
-#   docker compose run --rm tests       # testy automatyczne (bez klucza, na atrapie modelu)
+#   docker compose up -d --build        # UI: http://127.0.0.1:8080, API/proxy: http://127.0.0.1:8000
+#   (busy ports: API_PORT=18000 UI_PORT=18080 docker compose up -d --build)
+#   docker compose run --rm tests       # automated tests (keyless, runs against model mock)
 #
-# Klucz do dostawcy modelu (OPENROUTER_API_KEY) jest w backend/.env (compose czyta go przy starcie; do obrazu
-# nie trafia) albo w zmiennej środowiskowej powłoki. Polityka (policy/policy.yaml) jest montowana tylko do
-# odczytu: zapisz zmianę na hoście, a obowiązuje od następnego żądania, bez restartu.
+# Model provider key (OPENROUTER_API_KEY) is read from backend/.env or the shell environment.
+# Policy (policy/policy.yaml) is mounted read-only: edit on host to take effect on next request.
 
 x-hardening: &hardening
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
 
 services:
-  # Wykonuje kod z narzędzia run_python poza backendem: bez sieci, bez danych, z limitami czasu i pamięci.
-  # Backend łączy się z nim przez gniazdo Unix we wspólnym wolumenie.
+  # Executes code from the run_python tool isolated from backend: no network, no data, resource limits.
+  # Backend connects via Unix domain socket in a shared volume.
   executor:
     build:
       context: .
@@ -42,17 +41,17 @@ services:
       - path: backend/.env
         required: false
     environment:
-      API_HOST: 0.0.0.0                       # wygrywa z API_HOST=127.0.0.1 z backend/.env (inaczej port jest nieosiągalny)
+      API_HOST: 0.0.0.0                       # overrides API_HOST=127.0.0.1 from backend/.env (otherwise the port is unreachable)
       API_PORT: "8000"
-      HF_HUB_OFFLINE: "1"                     # modele PII i odmów są w obrazie
-      PYTHON_EXECUTOR_SOCKET: /run/executor/executor.sock   # run_python wykonuje osobny kontener
+      HF_HUB_OFFLINE: "1"                     # PII and refusal models are baked into image
+      PYTHON_EXECUTOR_SOCKET: /run/executor/executor.sock   # run_python executes in separate container
       CORS_ORIGINS: "http://127.0.0.1:${UI_PORT:-8080},http://localhost:${UI_PORT:-8080}"
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"    # tylko lokalnie; publiczny dostęp wymaga HTTPS i kontroli dostępu
+      - "127.0.0.1:${API_PORT:-8000}:8000"    # localhost only; public access requires HTTPS and auth
     volumes:
-      - ./backend/data:/repo/backend/data:ro  # dane narzędzi: tylko do odczytu (wymagają `git lfs pull`)
-      - ./policy:/repo/policy:ro              # jedno źródło konfiguracji, edytowane na hoście
-      - state:/state                          # log audytu, bazy rozmów i wydatków, nadpisania z panelu
+      - ./backend/data:/repo/backend/data:ro  # tool data: read-only
+      - ./policy:/repo/policy:ro              # single configuration source, edited on host
+      - state:/state                          # audit log, conversation/spending databases, UI overrides
       - executor-socket:/run/executor
     depends_on:
       executor:
@@ -82,7 +81,7 @@ services:
     mem_limit: 256m
     restart: unless-stopped
 
-  # Testy dla jury: docker compose run --rm tests   (profil `tests`, nie startuje z `up`)
+  # Tests service: docker compose run --rm tests
   tests:
     profiles: ["tests"]
     image: ai-control-layer-backend:local
@@ -94,10 +93,10 @@ services:
     command: ["python", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider"]
     environment:
       HF_HUB_OFFLINE: "1"
-      STATE_DIR: /tmp/state
-      POLICY_OVERRIDES_FILE: /tmp/state/policy.overrides.json
-      COMPANY_POLICIES_AUDIT_LOG: /tmp/state/company_policies_audit.jsonl
-      OPENROUTER_API_KEY: "sk-or-test-not-a-real-key"     # testy używają atrapy modelu i nie łączą się z siecią
+      STATE_DIR: ""
+      POLICY_OVERRIDES_FILE: ""
+      COMPANY_POLICIES_AUDIT_LOG: /tmp/company_policies_audit.jsonl
+      OPENROUTER_API_KEY: "sk-or-test-not-a-real-key"     # tests use mock client and offline evaluation
     volumes:
       - ./backend/data:/repo/backend/data:ro
     tmpfs:
@@ -107,3 +106,4 @@ services:
 volumes:
   state:
   executor-socket:
+

@@ -4,7 +4,7 @@ from typing import Optional
 from config import PII_MODEL, PII_THRESHOLD
 from security.common.spans import by_position
 
-# Mapowanie etykiet modelu zero-shot na kanoniczne kategorie PII/bezpieczeństwa
+# Mapping of zero-shot model labels to canonical PII/security entity categories
 LABEL_MAP = {
     "person": "NAME",
     "organization": "ORGANIZATION",
@@ -21,7 +21,7 @@ LABEL_MAP = {
 
 GLINER_LABELS = list(LABEL_MAP.keys())
 
-# Zaimki do wykluczenia z wykrywania osób (żeby nie generować fałszywych alarmów dla "I", "She", itp.)
+# Pronouns excluded from person detection to prevent false positives ("I", "She", etc.)
 PRONOUNS = {
     "i", "me", "my", "mine",
     "you", "your", "yours",
@@ -34,17 +34,17 @@ PRONOUNS = {
 
 @lru_cache(maxsize=1)
 def _load_model():
-    """Ładuje model GLiNER w pamięci podręcznej.
+    """Loads GLiNER model into memory (cached).
 
-    Import leniwy: gliner ciągnie torch (kilka sekund), więc import security.pii.pii_detector
-    nie spowalnia startu aplikacji, dopóki detekcja PII nie jest faktycznie potrzebna.
+    Lazy import: gliner pulls torch (few seconds), so importing security.pii.pii_detector
+    does not delay application startup until PII detection is actually executed.
     """
     from gliner import GLiNER
     return GLiNER.from_pretrained(PII_MODEL)
 
 
 def _chunk_text(text: str, max_chars: int = 1000, overlap: int = 200):
-    """Dzieli długi tekst na nakładające się okna, zachowując granice słów."""
+    """Splits long text into overlapping windows preserving word boundaries."""
     if len(text) <= max_chars:
         yield 0, text
         return
@@ -53,7 +53,7 @@ def _chunk_text(text: str, max_chars: int = 1000, overlap: int = 200):
     while start < len(text):
         end = min(start + max_chars, len(text))
         if end < len(text):
-            split_at = max(text.rfind(' ', start, end), text.rfind('\n', start, end))
+            split_at = max(text.rfind(' '), text.rfind('\n'))
             if split_at > start + 200:
                 end = split_at
         yield start, text[start:end]
@@ -63,9 +63,9 @@ def _chunk_text(text: str, max_chars: int = 1000, overlap: int = 200):
 
 
 def detect_gliner_pii(text: str, threshold: Optional[float] = None) -> list[dict]:
-    """Wykrywa encje semantyczne (organizacje, osoby, kwoty, lokalizacje, projekty) za pomocą GLiNER.
+    """Detects semantic entities (organizations, persons, amounts, locations, projects) using GLiNER.
 
-    Zwraca listę encji: [{"type", "text", "start", "end"}].
+    Returns list of entities: [{"type", "text", "start", "end"}].
     """
     if not text or not text.strip():
         return []
@@ -85,7 +85,7 @@ def detect_gliner_pii(text: str, threshold: Optional[float] = None) -> list[dict
             g_end = offset + pred["end"]
             matched_text = text[g_start:g_end]
 
-            # Dopasowanie indeksów bez spacji brzegowych
+            # Adjust index boundaries without surrounding whitespace
             l_strip = len(matched_text) - len(matched_text.lstrip())
             r_strip = len(matched_text) - len(matched_text.rstrip())
             final_start = g_start + l_strip

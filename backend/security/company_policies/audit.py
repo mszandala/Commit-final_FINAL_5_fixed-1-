@@ -1,4 +1,4 @@
-"""Audit log modułu: JSONL, jedna linia na decyzję. Zamiast treści zapisuje jej hash i długość."""
+"""Module audit log: JSONL, one line per decision. Persists content hash and length instead of raw payload."""
 import hashlib
 import json
 import os
@@ -21,7 +21,7 @@ def content_digest(text: str) -> str:
 class AuditLog:
     def __init__(self, path: Optional[Path] = DEFAULT_AUDIT_PATH, keep: int = 1000):
         self.path = Path(path) if path else None
-        self.events: deque[dict] = deque(maxlen=keep)  # ostatnie zdarzenia w pamięci (testy, podgląd na żywo)
+        self.events: deque[dict] = deque(maxlen=keep)  # In-memory buffer of recent events
         self._lock = threading.Lock()
         self._file = None
 
@@ -33,8 +33,7 @@ class AuditLog:
             if self.path is None:
                 return
             if self._file is None:
-                # Plik otwierany raz, a nie przy każdej decyzji; flush po każdej linii, więc log jest
-                # od razu widoczny na dysku.
+                # File opened once rather than per decision; flushed after each line.
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self._file = open(self.path, "a", encoding="utf-8")
                 weakref.finalize(self, self._file.close)
