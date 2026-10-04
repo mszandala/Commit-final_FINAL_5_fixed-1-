@@ -172,6 +172,7 @@ def meta():
         zones=ZONES,
         stages=STAGES,
         examples=EXAMPLES,
+        max_prompt_chars=pipeline.MAX_PROMPT_CHARS,
     )
 
 
