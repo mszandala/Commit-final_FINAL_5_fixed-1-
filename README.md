@@ -1,4 +1,4 @@
-# AI Control Layer
+# AI Control Layer - Who Let the Prompts Out?
 
 A security layer between users (or apps) and an LLM agent. It checks every prompt, tool call and reply, and masks sensitive data before the model sees it. Controls are set in `policy/policy.yaml`, which reloads without a restart.
 
