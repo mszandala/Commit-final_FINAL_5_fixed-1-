@@ -132,6 +132,7 @@ class Meta(ApiModel):
     zones: dict[str, str] = Field(description="Strefa kroku -> nazwa dla ludzi")
     stages: dict[str, str] = Field(description="Etap tury (zdarzenie stage w strumieniu) -> nazwa dla ludzi")
     examples: list[str]
+    max_prompt_chars: int = Field(description="MAX_PROMPT_CHARS: dłuższy prompt blokuje kontrola prompt_length")
 
 
 # --- log -------------------------------------------------------------------------------------

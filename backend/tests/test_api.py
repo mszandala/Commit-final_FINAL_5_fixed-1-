@@ -79,6 +79,7 @@ def _chat(role_id, message, conversation_id=None):
 
 def test_meta_and_roles():
     meta = client.get(f"{API}/meta").json()
+    assert meta["maxPromptChars"] == config.MAX_PROMPT_CHARS
     assert [a["id"] for a in meta["dataAccess"]] == ["projects", "hr", "clients", "campaigns", "stocks",
                                                      "earnings", "code", "subagents"]
     assert meta["piiTags"] == ["NAME", "SALARY", "PESEL"]

@@ -75,7 +75,8 @@ Odpowiedź (`ChatResponse`):
   kandydata; rozstrzyga sędzia LLM (przy jego awarii zostaje sama heurystyka).
 - `stage` to klucz z `GET /meta → controls`: `prompt_length`, `prompt_guard`, `tool_whitelist`, `pii_policy`,
   `code_guard`, `company_policies`, `chatbot_refusal`, `budget`. `prompt_length` blokuje prompt dłuższy niż
-  `MAX_PROMPT_CHARS` (domyślnie 4000 znaków). `budget` jako `block` oznacza wyczerpany budżet roli, a jako
+  `MAX_PROMPT_CHARS` (domyślnie 4000 znaków, w `GET /meta → maxPromptChars`; interfejs ostrzega przy 80%
+  i nie wysyła dłuższego, licząc też tekst odczytany z załączonych PDF-ów i obrazów). `budget` jako `block` oznacza wyczerpany budżet roli, a jako
   `warn` — że w tej turze bramka przerwała wywołania narzędzi po przekroczeniu limitu tokenów lub kosztu tury.
 - `tools[]` dla wykonanych wywołań ma też `tokens` i `cost` (zużycie w trakcie wywołania, np. subagenta)
   oraz `resultTokens` (szacunek, ile wynik dokłada do kontekstu modelu). Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
