@@ -391,3 +391,22 @@ def test_model_control_can_be_switched_off_and_empty_list_means_no_limit(store):
 
 def test_sample_allowed_models_match_the_models_offered_in_the_ui(store):
     assert store.get().models.allowed == [m["id"] for m in config.MODEL_PRESETS]
+
+
+# --- położenie pliku nadpisań ----------------------------------------------------------------------
+
+def test_overrides_file_can_live_outside_the_policy_directory(policy_file, tmp_path, monkeypatch):
+    elsewhere = tmp_path / "stan" / "nadpisania.json"
+    elsewhere.parent.mkdir()
+    monkeypatch.setenv("POLICY_OVERRIDES_FILE", str(elsewhere))
+    store = PolicyStore(policy_file)
+    store.set_override("controls.prompt_guard.mode", "warn")
+    assert store.overrides_path == elsewhere and elsewhere.exists()
+    assert not policy_file.with_name("policy.overrides.json").exists()
+    assert store.get().controls.prompt_guard.mode == "warn"
+
+
+def test_explicit_overrides_path_wins_over_the_environment(policy_file, tmp_path, monkeypatch):
+    monkeypatch.setenv("POLICY_OVERRIDES_FILE", str(tmp_path / "z-env.json"))
+    explicit = tmp_path / "jawna.json"
+    assert PolicyStore(policy_file, overrides_path=explicit).overrides_path == explicit
