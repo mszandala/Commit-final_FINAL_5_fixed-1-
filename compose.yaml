@@ -92,9 +92,11 @@ services:
     command: ["python", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider"]
     environment:
       HF_HUB_OFFLINE: "1"
-      STATE_DIR: /tmp/state
-      POLICY_OVERRIDES_FILE: /tmp/state/policy.overrides.json
-      COMPANY_POLICIES_AUDIT_LOG: /tmp/state/company_policies_audit.jsonl
+      # Obraz ustawia te trzy zmienne na wolumen /state. W testach muszą być puste: każdy test tworzy własny sklep
+      # polityki z plikiem obok tymczasowej kopii, a jeden wspólny plik przenosiłby nadpisania między testami.
+      STATE_DIR: ""
+      POLICY_OVERRIDES_FILE: ""
+      COMPANY_POLICIES_AUDIT_LOG: /tmp/company_policies_audit.jsonl     # pusta wartość oznaczałaby katalog "."
       OPENROUTER_API_KEY: "sk-or-test-not-a-real-key"     # testy używają atrapy modelu i nie łączą się z siecią
     volumes:
       - ./backend/data:/repo/backend/data:ro
