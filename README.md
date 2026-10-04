@@ -12,7 +12,7 @@ Set the model in `backend/.env` (copy `backend/.env.example`), **two options:**
 Then:
 
 ```bash
-git lfs pull                           # optional: stock price data (~1.7 GB)
+git lfs pull                           # stock price data (~1.7 GB), needed by the stock price tool
 docker compose up -d --build
 docker compose run --rm tests          # offline test suite, no key needed
 ```
