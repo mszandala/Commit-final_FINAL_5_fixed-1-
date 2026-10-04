@@ -1,0 +1,107 @@
+# AI Control Layer: warstwa bezpieczeństwa (proxy zgodne z OpenAI + panel) i aplikacja demonstracyjna.
+#
+#   docker compose up -d --build        # interfejs: http://127.0.0.1:8080, API/proxy: http://127.0.0.1:8000
+#   (zajęte porty: API_PORT=18000 UI_PORT=18080 docker compose up -d --build)
+#   docker compose run --rm tests       # testy automatyczne (bez klucza, na atrapie modelu)
+#
+# Klucz do dostawcy modelu (OPENROUTER_API_KEY) jest w backend/.env (compose czyta go przy starcie; do obrazu
+# nie trafia) albo w zmiennej środowiskowej powłoki. Polityka (policy/policy.yaml) jest montowana tylko do
+# odczytu: zapisz zmianę na hoście, a obowiązuje od następnego żądania, bez restartu.
+
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  # Wykonuje kod z narzędzia run_python poza backendem: bez sieci, bez danych, z limitami czasu i pamięci.
+  # Backend łączy się z nim przez gniazdo Unix we wspólnym wolumenie.
+  executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.executor
+    image: ai-control-layer-executor:local
+    <<: *hardening
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      - executor-socket:/run/executor
+    pids_limit: 32
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-control-layer-backend:local
+    <<: *hardening
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      HF_HUB_OFFLINE: "1"                     # modele PII i odmów są w obrazie
+      PYTHON_EXECUTOR_SOCKET: /run/executor/executor.sock   # run_python wykonuje osobny kontener
+      CORS_ORIGINS: "http://127.0.0.1:${UI_PORT:-8080},http://localhost:${UI_PORT:-8080}"
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"    # tylko lokalnie; publiczny dostęp wymaga HTTPS i kontroli dostępu
+    volumes:
+      - ./backend/data:/repo/backend/data:ro  # dane narzędzi: tylko do odczytu (wymagają `git lfs pull`)
+      - ./policy:/repo/policy:ro              # jedno źródło konfiguracji, edytowane na hoście
+      - state:/state                          # log audytu, bazy rozmów i wydatków, nadpisania z panelu
+      - executor-socket:/run/executor
+    depends_on:
+      executor:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    pids_limit: 256
+    mem_limit: 4g
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: ai-control-layer-frontend:local
+    <<: *hardening
+    ports:
+      - "127.0.0.1:${UI_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    pids_limit: 64
+    mem_limit: 256m
+    restart: unless-stopped
+
+  # Testy dla jury: docker compose run --rm tests   (profil `tests`, nie startuje z `up`)
+  tests:
+    profiles: ["tests"]
+    image: ai-control-layer-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    <<: *hardening
+    working_dir: /repo/backend
+    command: ["python", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider"]
+    environment:
+      HF_HUB_OFFLINE: "1"
+      STATE_DIR: /tmp/state
+      POLICY_OVERRIDES_FILE: /tmp/state/policy.overrides.json
+      COMPANY_POLICIES_AUDIT_LOG: /tmp/state/company_policies_audit.jsonl
+      OPENROUTER_API_KEY: "sk-or-test-not-a-real-key"     # testy używają atrapy modelu i nie łączą się z siecią
+    volumes:
+      - ./backend/data:/repo/backend/data:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    mem_limit: 4g
+
+volumes:
+  state:
+  executor-socket:

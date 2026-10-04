@@ -1,0 +1,27 @@
+# Repozytorium
+.git
+.gitattributes
+graphify-out
+
+# Sekrety i stan lokalny: nigdy do obrazu (klucz podaje compose przez zmienne środowiskowe)
+.env
+**/.env
+backend/spending.db
+backend/audit
+policy/*.overrides.json
+
+# Dane montowane z hosta (1,7 GB, w większości pliki Git LFS)
+backend/data
+
+# Cache i artefakty
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+**/node_modules
+frontend/dist
+
+# Dokumenty i skrypty, których obraz nie potrzebuje
+*.md
+!DOCKER.md

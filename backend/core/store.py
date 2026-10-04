@@ -197,8 +197,10 @@ class PolicyStore:
     def __init__(self, path: Optional[os.PathLike] = None, overrides_path: Optional[os.PathLike] = None,
                  on_reload: Optional[Callable[[Policy, list[dict]], None]] = None):
         self.path = Path(path) if path else default_policy_path()
-        self.overrides_path = (Path(overrides_path) if overrides_path
-                               else self.path.with_name(self.path.stem + ".overrides.json"))
+        # Nadpisania z interfejsu: podana ścieżka, POLICY_OVERRIDES_FILE albo plik obok polityki. Zmienna pozwala
+        # trzymać je w zapisywalnym katalogu stanu, gdy sama polityka jest zamontowana tylko do odczytu.
+        self.overrides_path = Path(overrides_path or os.getenv("POLICY_OVERRIDES_FILE")
+                                   or self.path.with_name(self.path.stem + ".overrides.json"))
         self._on_reload = on_reload
         self._lock = threading.RLock()
         self._policy: Optional[Policy] = None
