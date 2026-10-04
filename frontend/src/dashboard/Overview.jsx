@@ -130,6 +130,8 @@ function summarize(events) {
     }
     turns.push({ id: e.id, time: e.time, latencyMs: e.latencyMs, parts })
     const u = (users[e.user] ??= { user: e.user, role: e.role, turns: 0, blocked: 0, hidden: 0, refused: 0 })
+    // Live test turns share one user across roles.
+    if (u.role !== e.role) u.role = ''
     u.turns++
     u.blocked += isBlocked(e)
     u.hidden += isHidden(e)

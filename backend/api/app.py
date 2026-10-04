@@ -345,9 +345,14 @@ def stats():
 
 # --- testy na żywym modelu (live_tests/scenarios.json) ---------------------------------------
 
+# Tury testów mają w logu własnego użytkownika: inaczej raport bezpieczeństwa przypisałby ataki
+# ze scenariuszy prawdziwym osobom z ról.
+TEST_USER = "Live test"
+
+
 def _log_test_turn(name: str, conv: pipeline.Conversation, result: pipeline.TurnResult) -> int:
     """Tura testu trafia do logu jak zwykła rozmowa; budżetu roli nie obciąża, żeby testy nie blokowały czatu."""
-    return state.add_event(name, conv.id, result.verdict, result)["id"]
+    return state.add_event(name, conv.id, result.verdict, result, user=TEST_USER)["id"]
 
 
 @router.get("/tests", tags=["tests"],

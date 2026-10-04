@@ -152,7 +152,8 @@ def _decide(result: Optional[pipeline.TurnResult], verdict: Optional[dict], tool
 
 
 def add_event(role: str, conversation_id: str, verdict: Optional[dict],
-              result: Optional[pipeline.TurnResult] = None) -> dict:
+              result: Optional[pipeline.TurnResult] = None, user: Optional[str] = None) -> dict:
+    """`user` zastępuje przykładowego użytkownika roli (np. tury testów na żywym modelu)."""
     tools = result.tool_calls if result else []
     decision, stage, reason = _summarize(result, verdict, tools)
     cfg = ROLES[role]
@@ -164,7 +165,7 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
         event = {
             "id": (_events[-1]["id"] + 1) if _events else 1,
             "time": datetime.now(timezone.utc),
-            "user": cfg["user"],
+            "user": user or cfg["user"],
             "role": cfg["label"],
             "role_id": cfg["id"],
             "conversation_id": conversation_id,
