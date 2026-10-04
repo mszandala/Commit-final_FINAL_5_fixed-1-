@@ -24,7 +24,12 @@ def security_zone_classifier(text: str, categories: dict, policy) -> dict:
 def _warned(verdict):
     """Blokada zamieniona na ostrzeżenie; treść powodu przestaje mówić o zablokowaniu."""
     verdict.decision, verdict.is_blocked = "warn", False
-    verdict.reason = verdict.reason.replace("Zablokowano zgodnie z", "Możliwe naruszenie:")
+    verdict.reason = (
+        verdict.reason
+        .replace("Zablokowano zgodnie z", "Possible violation:")
+        .replace("Blocked pursuant to", "Possible violation:")
+        .replace("Możliwe naruszenie:", "Possible violation:")
+    )
     return verdict, True
 
 

@@ -1,4 +1,4 @@
-"""Informacja od warstwy bezpieczeństwa dołączana do pierwszej wiadomości rozmowy."""
+"""Security layer notice prepended to the first message of a conversation."""
 from .models import Policy
 
 MASKING_NOTE = (
@@ -9,11 +9,12 @@ MASKING_NOTE = (
 
 
 def build_notice(role: str, policy: Policy, conduct_rules: str = "") -> str:
-    """Rola, dozwolone obszary danych, opis znaczników i reguły postępowania w treści wiadomości.
+    """Build role description, allowed data areas, masking explanation, and conduct rules into prompt notice.
 
-    Warstwa ma działać przed dowolnym chatbotem, którego promptu systemowego nie kontrolujemy,
-    więc te informacje nie mogą iść w prompcie systemowym.
+    The security layer is designed to run in front of any chatbot whose system prompt we do not control,
+    so this context is carried directly in the conversation flow.
     """
+
     areas = ", ".join(policy.role_areas(role)) or "none"
     cfg = policy.role(role)
     parts = [

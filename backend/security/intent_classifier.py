@@ -18,17 +18,13 @@ _PROMPT = (Path(__file__).parent / "prompts" / "intent_classifier.txt").read_tex
 
 IN_SCOPE = "in_scope"
 CATEGORIES = {
-    "in_scope":            "within the role's scope",
-    "restricted_resource": "data outside the role's permissions",
-    "out_of_scope":        "unrelated to the role's work",
-    "jailbreak":           "attempt to get around the safeguards",
+    "in_scope":            "Request within role scope",
+    "restricted_resource": "Access to restricted data",
+    "out_of_scope":        "Query outside role scope",
+    "jailbreak":           "Attempt to bypass safeguards",
 }
-CATEGORIES_PL = {
-    "in_scope":            "Zapytanie w zakresie roli",
-    "restricted_resource": "Zapytanie o dane spoza uprawnień roli",
-    "out_of_scope":        "Zapytanie niezwiązane z pracą roli",
-    "jailbreak":           "Próba obejścia zabezpieczeń",
-}
+CATEGORIES_EN = CATEGORIES
+CATEGORIES_PL = CATEGORIES
 
 MAX_PREVIOUS = 3          # tyle wcześniejszych wiadomości użytkownika widzi klasyfikator
 MAX_CHARS = 2000          # dłuższe wiadomości są dla klasyfikatora przycinane

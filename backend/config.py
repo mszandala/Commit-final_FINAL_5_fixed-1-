@@ -3,74 +3,73 @@ from dataclasses import dataclass
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Wczytanie zmiennych środowiskowych (.env z folderu backend lub nadrzędnego)
+# Load environment variables (.env from backend or root directory)
 load_dotenv()
 load_dotenv(Path(__file__).parent / ".env")
 
-# Provider LLM: "openrouter" (domyślny) lub "ollama"
+# LLM Provider: "openrouter" (default) or "ollama"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
 
-# Konfiguracja OpenRouter
+# OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 
-# Konfiguracja Ollama
+# Ollama configuration
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
 
-# Aktywny model przypisany do providera
+# Active model assigned to provider
 MODEL = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else OLLAMA_MODEL
 
-# Model wykrywania PII / danych poufnych (GLiNER zero-shot NER)
+# PII / sensitive data detection model (GLiNER zero-shot NER)
 PII_MODEL = os.getenv("PII_MODEL", "urchade/gliner_small-v2.1")
 PII_THRESHOLD = float(os.getenv("PII_THRESHOLD", "0.35"))
 
-# Strefa bezpieczeństwa (strażnicy, sędziowie): widzi dane surowe i docelowo działa na lokalnej
-# infrastrukturze. Dziś idzie tym samym providerem co chatbot; zmiana to dwie zmienne w .env.
-# Puste = strefa bezpieczeństwa używa bieżącego providera i modelu chatbota (SETTINGS).
+# Security zone (guards, judges): sees raw data and targets local execution.
+# Defaults to same provider as chatbot unless overridden in .env.
+# Empty = security zone uses current chatbot provider and model (SETTINGS).
 SECURITY_PROVIDER = os.getenv("SECURITY_PROVIDER", "")
 SECURITY_MODEL = os.getenv("SECURITY_MODEL", "")
 
-# Maskowanie danych wrażliwych w strefie chatbota (prompt, historia, wyniki narzędzi)
+# Sensitive data masking in chatbot channel (prompt, history, tool results)
 MASKING_ENABLED = os.getenv("MASKING_ENABLED", "true").lower() == "true"
-# Sędzia LLM dla typów oznaczonych "judge" w CHATBOT_PII_POLICY; wyłączony = zawsze maskuj
+# LLM judge for entity types marked "judge" in CHATBOT_PII_POLICY; false = always mask
 PII_JUDGE_ENABLED = os.getenv("PII_JUDGE_ENABLED", "true").lower() == "true"
-# Klucz HMAC do pseudonimizacji identyfikatorów; pusty = losowy na czas działania procesu
+# HMAC key for identifier pseudonymization; empty = random per process lifetime
 PSEUDONYM_KEY = os.getenv("PSEUDONYM_KEY", "")
 
-# Tryb strażnika promptu: "warn" (ostrzega i przepuszcza) albo "block" (zatrzymuje zapytanie)
+# Prompt guard mode: "warn" (warns and allows through) or "block" (stops request)
 PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "block")
-# Klasyfikator intencji (LLM, strefa bezpieczeństwa): czy zapytanie mieści się w pracy roli.
-# Włączony rozstrzyga zamiast słów kluczowych strażnika; wyłączony = decyduje sam strażnik regex.
+# Intent classifier (LLM, security zone): determines if request fits role scope.
+# When enabled, resolves ambiguity over keyword regex guard; disabled = regex guard decides.
 INTENT_CLASSIFIER_ENABLED = os.getenv("INTENT_CLASSIFIER_ENABLED", "true").lower() == "true"
 
-# Katalog zapisywalnego stanu: log audytu, baza rozmów i baza wydatków. Domyślnie obok kodu; w kontenerze
-# z systemem plików tylko do odczytu wskaż wolumen zmienną STATE_DIR (np. /state).
+# Writable state directory: audit log, conversation DB, and spending DB. Defaults to local repo;
+# in read-only container mount point, specify volume via STATE_DIR (e.g. /state).
 STATE_DIR = Path(os.getenv("STATE_DIR") or Path(__file__).parent)
 AUDIT_LOG = STATE_DIR / "audit" / "events.jsonl"
-# Gdzie trafiają zdarzenia audytu: "file" (domyślnie), "stdout" (JSON w linii, np. dla `docker logs`),
-# "both" albo "none" (log tylko w pamięci i w bazie rozmów).
+# Audit log destination: "file" (default), "stdout" (line-delimited JSON), "both", or "none".
 AUDIT_SINK = os.getenv("AUDIT_SINK", "file").lower()
 
 
 @dataclass
 class Settings:
-    """Ustawienia zmienialne w trakcie działania (formularz konfiguracji w interfejsie).
+    """Runtime mutable settings (UI configuration form).
 
-    Moduły czytają je w chwili użycia, więc zmiana przez API działa od następnej wiadomości.
-    Wartości startowe pochodzą z .env; po restarcie serwera wracają do nich.
+    Modules inspect settings at execution time; API updates take effect on next turn.
+    Initial values are loaded from .env and reset on server restart.
     """
     provider: str             # "openrouter" | "ollama"
     model: str
     openrouter_api_key: str
     pii_threshold: float
     guard_mode: str           # "warn" | "block"
-    mask_pii: bool            # maskowanie w strefie chatbota i ukrywanie PII w odpowiedzi
-    filters: dict             # id filtra z FILTERS -> czy włączony
+    mask_pii: bool            # masking in chatbot channel and response PII hiding
+    filters: dict             # filter id from FILTERS -> is_enabled
 
 
-# Filtry, które można wyłączyć z interfejsu, żeby zobaczyć zachowanie systemu bez danego zabezpieczenia.
-# Kolejność odpowiada kolejności etapów tury. Wartości startowe: DEFAULT_FILTERS.
+# Filters toggleable via UI to observe system behavior with specific guardrails disabled.
+# Order corresponds to turn stage sequence. Initial values: DEFAULT_FILTERS.
 FILTERS = [
     {"id": "prompt_length", "label": "Prompt length limit",
      "description": "Rejects prompts longer than the character limit before any model sees them"},
@@ -101,21 +100,21 @@ SETTINGS = Settings(
     filters=dict(DEFAULT_FILTERS),
 )
 
-# Modele do wyboru w formularzu konfiguracji.
+# Model choices for configuration UI.
 MODEL_PRESETS = [
     {"id": "google/gemma-4-26b-a4b-it",      "label": "Gemma 4 26B",            "provider": "openrouter"},
     {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26B, free tier", "provider": "openrouter"},
     {"id": "gemma4:12b",                     "label": "Gemma 4 12B",            "provider": "ollama"},
 ]
 
-# Poziomy czułości detektora PII (próg GLiNER): im niższy próg, tym więcej wykryć.
+# PII sensitivity thresholds (GLiNER threshold): lower threshold = higher sensitivity.
 PII_SENSITIVITY_LEVELS = [
     {"id": "low",      "label": "Low",      "threshold": 0.50},
     {"id": "balanced", "label": "Balanced", "threshold": 0.35},
     {"id": "high",     "label": "High",     "threshold": 0.20},
 ]
 
-# Etapy kontroli (pole `stage` werdyktów i zdarzeń) i ich nazwy dla ludzi.
+# Control stage names for human display and telemetry.
 CONTROLS = {
     "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
@@ -131,54 +130,50 @@ CONTROLS = {
 BASE_DIR       = Path(__file__).parent / "data"
 CONTEXT_FOLDERS = ["bank_data", "clients_data", "employee_data", "projects", "stock_market"]
 
-# Dane modułu company_policies. Celowo poza CONTEXT_FOLDERS: agent nie czyta ich narzędziami plikowymi.
-COMPANY_DOCUMENTS_DIR = BASE_DIR / "company_documents"  # regulaminy, NDA, polityki (.md ze znacznikami control:)
-COMPANY_FIXTURES_DIR  = BASE_DIR / "company_fixtures"   # poufne materiały do fingerprintingu
+# Data for company_policies module. Kept separate from CONTEXT_FOLDERS so agent cannot read them via file tools.
+COMPANY_DOCUMENTS_DIR = BASE_DIR / "company_documents"  # regulations, NDA, policies (.md with control: tags)
+COMPANY_FIXTURES_DIR  = BASE_DIR / "company_fixtures"   # confidential material for fingerprinting
+
 MAX_HISTORY    = 12
 MAX_TOOL_STEPS = 10
-# Limit wydatków na rolę w dolarach (łącznie, bez dziennego zerowania) i baza, w której są zapisywane.
+# Spending limit per role in USD (cumulative, no daily reset) and database path.
 MAX_SPENDING = 0.5
-# Najdłuższy prompt użytkownika (w znakach); dłuższy jest odrzucany przed jakimkolwiek wywołaniem modelu.
+# Maximum user prompt length (in characters); longer prompts are rejected before reaching any model.
 MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", "4000"))
-# Limity jednej tury w strefie chatbota (model, wywołania narzędzi, subagent). Po ich przekroczeniu
-# bramka odrzuca kolejne wywołania narzędzi, a model ma odpowiedzieć z tego, co już ma.
+# Limits for a single turn in chatbot zone (model, tool invocations, subagent).
+# When exceeded, tool gate rejects further invocations and model finalizes answer.
 MAX_TURN_TOKENS = int(os.getenv("MAX_TURN_TOKENS", "40000"))
 MAX_TURN_COST = float(os.getenv("MAX_TURN_COST", "0.05"))
-# Najdłuższy wynik narzędzia (w znakach) przekazywany modelowi; dłuższy jest przycinany.
+# Maximum tool result length (in characters) forwarded to model; longer outputs are truncated.
 MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "24000"))
 SPENDING_DB = STATE_DIR / "spending.db"
 
-# Moduł regulaminów firmowych (security/company_policies) w przebiegu tury.
+# Company policy enforcement module (security/company_policies) in turn pipeline.
 COMPANY_POLICIES_ENABLED = os.getenv("COMPANY_POLICIES_ENABLED", "true").lower() == "true"
-# Klasyfikator semantyczny modułu: "security" = strefa bezpieczeństwa (SECURITY_PROVIDER/SECURITY_MODEL),
-# "policy" = provider i model z nagłówka rules.txt (docelowo lokalna Ollama).
+# Semantic classifier for module: "security" = security zone (SECURITY_PROVIDER/SECURITY_MODEL),
+# "policy" = provider and model from rules.txt header (e.g. local Ollama).
 COMPANY_POLICIES_CLASSIFIER = os.getenv("COMPANY_POLICIES_CLASSIFIER", "security")
-# Samo słowo kluczowe w wyniku narzędzia albo w odpowiedzi to słaby dowód (np. „marża” w omówieniu
-# wyników spółki), więc domyślnie daje ostrzeżenie zamiast blokady. W prompcie blokuje jak dotąd;
-# znaczniki, wzorce, odciski plików i klasyfikator blokują wszędzie. true = blokuj także tutaj.
+# Keyword alone in tool result or reply is weak evidence, so it warns by default instead of blocking.
+# Set true to enforce hard blocks on keywords in outputs as well.
 COMPANY_POLICIES_STRICT_KEYWORDS = os.getenv("COMPANY_POLICIES_STRICT_KEYWORDS", "false").lower() == "true"
-# Ocena tematu przez klasyfikator bez twardego dowodu (klauzula, numer umowy, odcisk pliku) myli się
-# zbyt często, żeby sama blokowała: w testach QA zatrzymywała zwykłe pytania jako „cenniki i marże".
-# Domyślnie daje ostrzeżenie; true = blokuj jak w regułach.
+# Semantic classification without hard proof warns by default; true = block strictly.
 COMPANY_POLICIES_SEMANTIC_BLOCKS = os.getenv("COMPANY_POLICIES_SEMANTIC_BLOCKS", "false").lower() == "true"
-# Gdy klasyfikator jest niedostępny (brak klucza, błąd dostawcy): true = blokuj (fail-closed, jak
-# w regułach), false = ostrzeżenie i sprawdzenie samymi regułami deterministycznymi.
+# When classifier is unavailable: true = fail-closed (block), false = warn and fall back to deterministic rules.
 COMPANY_POLICIES_FAIL_CLOSED = os.getenv("COMPANY_POLICIES_FAIL_CLOSED", "false").lower() == "true"
 
-# Wykrywanie odmowy w odpowiedzi chatbota (security/refusal_detector.py): słowa kluczowe, a gdy nic
-# nie znajdą — podobieństwo zdań do wzorcowych odmów liczone lokalnym modelem embeddingów.
+# Refusal detection in chatbot response (security/refusal_detector.py): regex keywords, and if not matched,
+# sentence embedding similarity against benchmark refusal exemplars via local embedding model.
 REFUSAL_DETECTION_ENABLED = os.getenv("REFUSAL_DETECTION_ENABLED", "true").lower() == "true"
 REFUSAL_EMBEDDINGS_ENABLED = os.getenv("REFUSAL_EMBEDDINGS_ENABLED", "true").lower() == "true"
 REFUSAL_MODEL = os.getenv("REFUSAL_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 REFUSAL_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.5"))
-# Sędzia LLM potwierdza odmowę; słowa kluczowe i podobieństwo (od niższego progu) tylko wskazują kandydata.
+# LLM judge validates refusal; keywords and similarity identify candidates.
 REFUSAL_JUDGE_ENABLED = os.getenv("REFUSAL_JUDGE_ENABLED", "true").lower() == "true"
 REFUSAL_TRIGGER_THRESHOLD = float(os.getenv("REFUSAL_TRIGGER_THRESHOLD", "0.35"))
 
-# Ogólne reguły postępowania dla chatbota (decyzje kadrowe, dyskryminacja itp.). Warstwa nie zmienia
-# promptu systemowego chronionego chatbota — reguły dołącza do pierwszej wiadomości rozmowy.
+# General conduct rules for chatbot. Layer injects rules into first user message notice.
 CONDUCT_RULES_FILE = Path(__file__).parent / "security" / "rules.txt"
-# Narzędzia pogrupowane po domenach danych (podfoldery data/).
+# Tools grouped by data domains (data/ subfolders).
 _GENERIC_TOOLS = ["list_files", "read_file"]
 _PROJECTS  = ["list_projects", "read_project"]
 _HR        = ["read_employee_records", "summarize_employee_records"]
@@ -188,8 +183,7 @@ _MARKET    = ["read_stock_prices", "list_earnings_calls", "read_earnings_call"]
 _CODE      = ["run_python"]
 _SUBAGENT  = ["create_subagent"]
 
-# Obszary dostępu pokazywane w macierzy ról w interfejsie: id -> etykieta i narzędzia.
-# Narzędzia spoza tych obszarów (_GENERIC_TOOLS) nie są edytowalne z interfejsu.
+# Data access areas displayed in UI role matrix: id -> label and tools.
 DATA_ACCESS = {
     "projects":  {"label": "Projects",       "tools": _PROJECTS},
     "hr":        {"label": "HR data",        "tools": _HR},
@@ -201,8 +195,7 @@ DATA_ACCESS = {
     "subagents": {"label": "Subagents",      "tools": _SUBAGENT},
 }
 
-# Zasób danych → narzędzia, które go czytają. Z tego prompt_guard wylicza, czy rola ma dostęp
-# do zasobu, o który pyta użytkownik — zmiana allowed_tools od razu zmienia jego decyzje.
+# Data resource -> tools reading it. Prompt guard verifies role access from this mapping.
 RESOURCE_TOOLS = {
     "employee_data":  _HR,
     "client_data":    _CLIENTS,
@@ -211,13 +204,13 @@ RESOURCE_TOOLS = {
     "earnings_calls": ["list_earnings_calls", "read_earnings_call"],
 }
 
-# Kategorie PII obsługiwane globalnie, niezależnie od allowed_pii roli:
-# - BLOCKED: odpowiedź się nie wyświetla (w danych ich nie ma, więc wykrycie = wyciek lub injection),
-# - REDACTED: fragment zastępowany znacznikiem [TYP], reszta odpowiedzi zostaje.
+# PII categories handled globally, regardless of role allowed_pii:
+# - BLOCKED: response blocked entirely,
+# - REDACTED: snippet replaced with [TYPE] placeholder.
 GLOBAL_BLOCKED_PII  = ["PASSWORD", "CREDIT-CARD-NO"]
 GLOBAL_REDACTED_PII = ["EMAIL", "PHONE-NO"]
 
-# Nazwy typów dla interfejsu: znaczniki [TYP] w odpowiedzi; REDACTED to komórka tabeli ukryta u źródła.
+# Display names for UI: [TYPE] markers in response; REDACTED for table cells hidden at source.
 PII_LABELS = {
     "NAME":           "Name",
     "SALARY":         "Salary",
@@ -235,53 +228,53 @@ PII_LABELS = {
     "REDACTED":       "Hidden",
 }
 
+
 ROLES = {
     "podstawowy użytkownik": {
-        "description": "Pracownik bez specjalnych uprawnień; korzysta z ogólnej bazy wiedzy o projektach.",
+        "description": "Standard employee without elevated permissions; accesses general project knowledge.",
         "allowed_tools": _PROJECTS,
         "allowed_pii": ["PROJECT", "ORGANIZATION"],
     },
     "kadry": {
-        "description": "Dział kadr; pracuje na danych pracowników: stanowiska, wynagrodzenia, oceny, rotacja.",
+        "description": "HR department (Dział kadr); works with employee records: positions, compensation, performance, attrition.",
         "allowed_tools": _PROJECTS + _HR,
         "allowed_pii": ["SALARY", "PROJECT", "ORGANIZATION"],
     },
     "administrator": {
-        "description": "Administrator systemu z pełnym dostępem do wszystkich danych.",
+        "description": "System administrator with full access to all tools and company data.",
         "allowed_tools": _PROJECTS + _HR + _CLIENTS + _CAMPAIGNS + _MARKET + _CODE + _GENERIC_TOOLS + _SUBAGENT,
         "allowed_pii": ["NAME", "SALARY", "ORGANIZATION", "LOCATION", "PROJECT"],
     },
     "bankier": {
-        "description": "Doradca bankowy; obsługuje klientów banku (saldo, scoring, ryzyko odejścia) i kampanie sprzedaży lokat.",
+        "description": "Bank relationship advisor; manages bank client accounts and deposit marketing campaigns.",
         "allowed_tools": _PROJECTS + _CLIENTS + _CAMPAIGNS,
         "allowed_pii": ["SALARY", "LOCATION", "PROJECT", "ORGANIZATION"],
     },
     "IT": {
-        "description": "Dział IT; korzysta z dokumentacji technicznej projektów.",
+        "description": "IT engineering; utilizes technical project documentation and code tools.",
         "allowed_tools": _PROJECTS + _SUBAGENT,
         "allowed_pii": ["PROJECT", "ORGANIZATION"],
     },
     "analityk": {
-        "description": "Analityk danych; pracuje na danych kampanii, spseudonimizowanych rekordach klientów oraz danych rynkowych.",
+        "description": "Data analyst; works on marketing campaigns, pseudonymized client records, and market data.",
         "allowed_tools": _PROJECTS + _CLIENTS + _CAMPAIGNS + _MARKET + _SUBAGENT,
         "allowed_pii": ["SALARY", "ORGANIZATION", "LOCATION", "PROJECT"],
-        # Widzi rekordy klientów, ale identyfikatory tylko jako stałe pseudonimy.
+        # Sees client records, but identifiers are kept as stable pseudonyms.
         "pii_policy": {"CLIENT-ID": "pseudonymize", "ACCOUNT-NO": "pseudonymize", "EMPLOYEE-ID": "pseudonymize"},
     },
     "prawnik": {
-        "description": "Dział prawny; analizuje publiczne wypowiedzi spółek z telekonferencji wynikowych.",
+        "description": "Legal counsel; analyzes public disclosures and quarterly earnings calls.",
         "allowed_tools": _PROJECTS + ["list_earnings_calls", "read_earnings_call"],
         "allowed_pii": ["ORGANIZATION", "NAME", "LOCATION", "PROJECT"],
     },
     "Portfolio Manager": {
-        "description": "Zarządzający portfelem; analizuje notowania i telekonferencje wynikowe spółek.",
+        "description": "Portfolio manager; analyzes stock performance and public corporate earnings calls.",
         "allowed_tools": _PROJECTS + _MARKET,
         "allowed_pii": ["SALARY", "ORGANIZATION", "NAME", "LOCATION", "PROJECT"],
     },
 }
 
-# Tożsamość roli w API i interfejsie: id (alias akceptowany przez prompt_guard), etykieta,
-# przykładowy użytkownik i jego dzienny budżet tokenów.
+# Role identity in API and UI: id, label, example user and daily token budget.
 _ROLE_PROFILES = {
     "podstawowy użytkownik": ("basic_user",        "Employee",          "Piotr Nowak",         20_000),
     "kadry":                 ("hr",                "HR",                "Anna Wiśniewska",     50_000),
@@ -294,16 +287,14 @@ _ROLE_PROFILES = {
 }
 for _name, (_id, _label, _user, _budget) in _ROLE_PROFILES.items():
     ROLES[_name].update(id=_id, label=_label, user=_user, daily_token_budget=_budget)
-# Kolejność ról w interfejsie: od najmniejszych uprawnień, administrator na końcu.
+# Role ordering in UI: from least privilege, admin last.
 ROLES = {_name: ROLES[_name] for _name in _ROLE_PROFILES}
 
 
-# --- Polityki danych wrażliwych -------------------------------------------------------------
-# Działania: "allow" (pokaż), "redact" (zamaskuj), "block" (zablokuj całość),
-#            "judge" (tylko kanał chatbota: decyduje sędzia LLM), "pseudonymize" (tylko identyfikatory).
+# --- Sensitive data policies -------------------------------------------------------------
+# Actions: "allow", "redact", "block", "judge" (LLM judge in chatbot channel), "pseudonymize".
 
-# Kanał chatbota: co z promptu użytkownika może zobaczyć model w chmurze. Jedna polityka,
-# niezależna od roli. Sędzia rozstrzyga wyłącznie typy "judge"; "redact" i "block" to twardy sufit.
+# Chatbot channel: what from user prompt and tool outputs can be seen by external cloud model.
 CHATBOT_PII_POLICY = {
     "PASSWORD":       "redact",
     "EMAIL":          "redact",
@@ -320,35 +311,31 @@ CHATBOT_PII_POLICY = {
     "PROJECT":        "allow",
 }
 
-# Kanał użytkownika, w kolejności stosowania (security/masking.py: role_policy):
-#   1. DEFAULT_ROLE_PII_POLICY - punkt wyjścia; typ spoza tej mapy jest ukrywany,
-#   2. `allowed_pii` roli      - "allow",
-#   3. `pii_policy` roli       - nadpisuje pojedyncze typy,
-#   4. GLOBAL_BLOCKED_PII / GLOBAL_REDACTED_PII - obowiązują każdą rolę; `pii_policy` może je
-#      tylko zaostrzyć, nigdy złagodzić.
-# Typ spoza `allowed_pii` jest ukrywany, a nie blokuje całej odpowiedzi.
+# User channel policy precedence (security/masking.py: role_policy):
+#   1. DEFAULT_ROLE_PII_POLICY - baseline policy; omitted types are hidden,
+#   2. `allowed_pii` of role   - "allow",
+#   3. `pii_policy` of role    - overrides specific types,
+#   4. GLOBAL_BLOCKED_PII / GLOBAL_REDACTED_PII - enforced across all roles.
 DEFAULT_ROLE_PII_POLICY = {
     "NAME":           "redact",
     "SALARY":         "redact",
     "PESEL":          "redact",
-    # Nazwy miejsc, organizacji i projektów nie są danymi osobowymi: widzi je każda rola,
-    # niezależnie od `allowed_pii` (ukrywanie ich psuło zwykłe odpowiedzi).
     "ORGANIZATION":   "allow",
     "LOCATION":       "allow",
     "PROJECT":        "allow",
-    "CLIENT-ID":      "allow",     # kto ma narzędzie do rekordów, ten widzi ich identyfikatory
+    "CLIENT-ID":      "allow",
     "ACCOUNT-NO":     "allow",
     "EMPLOYEE-ID":    "allow",
 }
 
-# Typy, których wartości zamieniamy na stałe pseudonimy (HMAC) zamiast kolejnych znaczników.
+# Identifier types converted to stable HMAC pseudonyms.
 ID_TYPES = ["CLIENT-ID", "ACCOUNT-NO", "EMPLOYEE-ID"]
 
-# Kolumny CSV z danymi wrażliwymi: narzędzie -> kolumna -> typ.
+# Sensitive CSV columns: tool -> column -> type.
 COLUMN_TYPES = {
     "read_client_records": {
         "customer_id": "CLIENT-ID",
-        "account_number": "ACCOUNT-NO",     # zawiera w sobie customer_id
+        "account_number": "ACCOUNT-NO",
         "estimated_salary": "SALARY",
     },
     "read_employee_records": {
@@ -360,15 +347,14 @@ COLUMN_TYPES = {
     },
 }
 
-# Jak skanować wynik narzędzia, zanim trafi do chatbota:
-#   "columns" - polityka kolumn CSV (COLUMN_TYPES), bez detektora
-#   "regex"   - tylko reguły (hasła, e-maile, telefony); dla dużych tekstów ze źródeł publicznych
-#   "full"    - reguły + GLiNER, z pamięcią podręczną
-#   "none"    - bez skanowania (wynik powstał już w strefie chatbota)
+# How to scan tool results before passing back to model:
+#   "columns" - CSV column policy (COLUMN_TYPES), no NER detector
+#   "regex"   - regex only (passwords, emails, phones); for large public texts
+#   "full"    - regex + GLiNER with caching
+#   "none"    - no scanning
 TOOL_RESULT_SCAN = {
     "read_client_records":   "columns",
     "read_employee_records": "columns",
-    # statystyki po całym pliku: bez identyfikatorów (grupowanie po nich jest odrzucane w narzędziu)
     "summarize_client_records":   "none",
     "summarize_employee_records": "none",
     "read_bank_campaigns":   "none",
@@ -381,11 +367,12 @@ TOOL_RESULT_SCAN = {
 }
 DEFAULT_TOOL_RESULT_SCAN = "full"
 
-# Narzędzia czytające źródła publiczne: wartości z ich wyników nie są traktowane jak PII w odpowiedzi.
+# Tools accessing public sources: outputs are not treated as internal PII in replies.
 PUBLIC_SOURCE_TOOLS = [
     "list_projects", "read_project", "read_bank_campaigns",
     "read_stock_prices", "list_earnings_calls", "read_earnings_call",
 ]
 
-# Narzędzia, których argumenty trafiają z powrotem do modelu w chmurze — nie odmaskowujemy ich.
+# Tools whose arguments return to the cloud model: do not unmask them.
 CHATBOT_ZONE_TOOLS = ["create_subagent"]
+

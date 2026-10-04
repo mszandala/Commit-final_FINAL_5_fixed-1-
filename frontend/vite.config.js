@@ -1,4 +1,4 @@
-import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -23,6 +23,7 @@ function ocrFiles() {
   const files = {}
   for (const [to, from] of Object.entries(OCR_FILES)) {
     const source = join('node_modules', from)
+    if (!existsSync(source)) continue
     if (statSync(source).isDirectory()) {
       for (const name of readdirSync(source)) files[`ocr/${to}/${name}`] = join(source, name)
     } else {

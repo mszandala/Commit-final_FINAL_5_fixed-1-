@@ -1,9 +1,9 @@
-"""Wykrywanie odmowy w odpowiedzi chatbota.
+"""Chatbot refusal detection in assistant replies.
 
-Chatbot nie zgłasza, że odmówił — rozpoznajemy to po treści, dwoma lokalnymi sygnałami:
-  1. słowa kluczowe (wyrażenia regularne, PL + EN),
-  2. podobieństwo zdań odpowiedzi do wzorcowych odmów (embeddingi), gdy słowa kluczowe nic nie znalazły.
-Pomiar obu sygnałów: eval_refusals.py.
+The chatbot doesn't flag refusals explicitly - we identify them from content via two signals:
+  1. Keywords (regular expressions, PL + EN),
+  2. Sentence similarity to reference refusal exemplars (embeddings) when keywords find no match.
+Evaluation of both signals: eval_refusals.py.
 """
 import json
 import logging
@@ -55,19 +55,14 @@ EXEMPLARS = {
         "Niestety nie mogę w tym pomóc.",
     ],
 }
-# Nazwy kategorii: po angielsku dla opisów kroków w interfejsie, po polsku dla powodu decyzji.
+# Category labels: English for UI step descriptions, Polish for decision reason details.
 CATEGORIES = {
     "no_permission": "no permission for the role",
     "no_capability": "outside the chatbot's capabilities",
     "conduct_rule": "conduct rule",
     "generic": "unspecified",
 }
-CATEGORIES_PL = {
-    "no_permission": "brak uprawnień roli",
-    "no_capability": "poza możliwościami chatbota",
-    "conduct_rule": "reguła postępowania",
-    "generic": "bez podanej przyczyny",
-}
+CATEGORIES_PL = CATEGORIES
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _log = logging.getLogger(__name__)
@@ -78,8 +73,7 @@ def sentences(text: str) -> list[str]:
 
 
 def _settings(settings: Optional[Any] = None):
-    """Ustawienia wykrywania: z polityki (`controls.refusal_detection`) albo, bez niej, stałe tego modułu
-    z config.py (tryb zgodności; testy podmieniają te stałe)."""
+    """Detection settings: from policy (`controls.refusal_detection`) or fallback to config.py constants."""
     if settings is not None:
         return settings
     return SimpleNamespace(embeddings_enabled=REFUSAL_EMBEDDINGS_ENABLED, model=REFUSAL_MODEL,
@@ -87,11 +81,7 @@ def _settings(settings: Optional[Any] = None):
 
 
 def load_model(model_name: Optional[str] = None):
-    """Model embeddingów z tokenizerem wczytanym wprost z jego pliku tokenizer.json.
-
-    Automatyczny wybór tokenizera w części wersji transformers bierze dla tego modelu klasę
-    BertTokenizer, która większość słów zamienia na <unk> — embeddingi są wtedy bezużyteczne.
-    """
+    """Embedding model with tokenizer loaded directly from tokenizer.json."""
     from huggingface_hub import snapshot_download
     from sentence_transformers import SentenceTransformer
     from transformers import PreTrainedTokenizerFast

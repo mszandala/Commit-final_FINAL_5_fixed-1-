@@ -377,12 +377,12 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     try:
         raw_reply, new_history = agent.run_agent(sent, history=conv.history, tool_gate=gate, chat=chat)
     except agent.ResponseBlocked as exc:
-        return finish(f"Odpowiedź została zablokowana: {exc}",
+        return finish(f"Response blocked: {exc}",
                       {"decision": "block", "stage": "tool_whitelist", "reason": str(exc)},
                       masked_prompt, entities)
     except Exception as exc:
         audit.record("error", "chatbot", error=type(exc).__name__)
-        return finish(f"Błąd wykonania modelu: {exc}", None, masked_prompt, entities, error=str(exc))
+        return finish(f"Model execution error: {exc}", None, masked_prompt, entities, error=str(exc))
     # Model czasem wypisuje wywołanie narzędzia jako tekst. Takiej odpowiedzi nie pokazujemy:
     # jedna ponowna próba, a potem błąd tury.
     if _RAW_TOOL_CALL.search(raw_reply or ""):
@@ -391,11 +391,11 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
             raw_reply, new_history = agent.run_agent(_RETRY_MESSAGE, history=new_history, tool_gate=gate, chat=chat)
         except Exception as exc:
             audit.record("error", "chatbot", error=type(exc).__name__)
-            return finish(f"Błąd wykonania modelu: {exc}", None, masked_prompt, entities, error=str(exc))
+            return finish(f"Model execution error: {exc}", None, masked_prompt, entities, error=str(exc))
         if _RAW_TOOL_CALL.search(raw_reply or ""):
             audit.record("error", "chatbot", error="MalformedToolCall")
-            return finish("Model nie zwrócił odpowiedzi.", None, masked_prompt, entities,
-                          error="model zwrócił wywołanie narzędzia jako tekst zamiast odpowiedzi")
+            return finish("Model did not return a response.", None, masked_prompt, entities,
+                          error="model returned tool call as text instead of response")
     conv.history = new_history
     leaks = _count_leaks(new_history, conv.vault)
 

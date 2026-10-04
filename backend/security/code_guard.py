@@ -4,17 +4,15 @@ import re
 
 from security.common.verdicts import Verdict
 
-# Moduły czysto obliczeniowe — bez dostępu do plików, sieci i procesów.
+# Pure computational modules — no file, network, or OS process access.
 ALLOWED_MODULES = {
     "math", "statistics", "json", "datetime", "re", "collections", "itertools",
     "functools", "random", "decimal", "fractions", "string", "textwrap", "operator",
 }
 
-# Znane wektory ataków: nazwany powód i typ ataku trafiają do audytu zamiast ogólnego „moduł spoza listy”.
-# Wszystko spoza ALLOWED_MODULES i tak jest blokowane; ta tabela nadaje blokadzie nazwę (raport dla zespołu
-# bezpieczeństwa, statystyki po typach ataków).
+# Known attack vectors: designated attack type and reason are sent to audit telemetry.
 _DANGEROUS = {
-    # moduł: (typ ataku, powód)
+    # module: (attack_type, reason)
     "os": ("Code_Execution", "dostęp do systemu operacyjnego"),
     "sys": ("Sandbox_Escape", "dostęp do interpretera"),
     "subprocess": ("Code_Execution", "uruchamianie procesów"),
@@ -64,11 +62,10 @@ _DANGEROUS = {
 }
 DANGEROUS_MODULES = {module: reason for module, (_, reason) in _DANGEROUS.items()}
 
-# Pomocniki czytające atrybuty po nazwie podanej jako napis: omijają blokadę atrybutów __dunder__,
-# bo w drzewie składni nie ma wtedy węzła Attribute (np. operator.attrgetter('__class__')(x)).
+# Helpers reading attributes dynamically by string name: bypass __dunder__ attribute AST inspection.
 INTROSPECTION_HELPERS = {"attrgetter", "methodcaller", "Formatter", "vformat", "get_field"}
 
-# Napis z nazwą atrybutu specjalnego ('__class__', '{0.__globals__}'.format(...)) służy do tego samego.
+# String containing special dunder attribute names.
 _DUNDER_STRING = re.compile(r"__[A-Za-z0-9_]+__")
 
 FORBIDDEN_CALLS = {
@@ -92,15 +89,11 @@ SAFE_BUILTINS["__import__"] = _safe_import
 
 
 def check_code(code: str) -> Verdict:
-    """Statyczna analiza kodu przed wykonaniem w run_python: importy, wywołania, atrybuty dunder.
-
-    To kontrola statyczna, a nie piaskownica: kod i tak działa w procesie wywołującego, więc prawdziwą
-    izolację (osobny kontener, limity czasu i pamięci) zapewnia dopiero wydzielony executor.
-    """
+    """Static Python AST inspection prior to execution in run_python: imports, calls, dunder attributes."""
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
-        return Verdict("block", f"Błąd składni: {e.msg}", "code_guard", is_blocked=True)
+        return Verdict("block", f"Syntax error: {e.msg}", "code_guard", is_blocked=True)
 
     for node in ast.walk(tree):
         problem = _inspect(node)
@@ -109,11 +102,12 @@ def check_code(code: str) -> Verdict:
             return Verdict("block", reason, "code_guard",
                            {"line": getattr(node, "lineno", None), "attack_type": attack_type},
                            is_blocked=True)
-    return Verdict("pass", "Kod bez niebezpiecznych konstrukcji", "code_guard")
+    return Verdict("pass", "Code verified safe", "code_guard")
+
 
 
 def _inspect(node: ast.AST):
-    """Zwraca (powód, typ ataku) pierwszego naruszenia w węźle albo None."""
+    """Returns (reason, attack_type) of first violation in node, or None."""
     if isinstance(node, ast.Import):
         modules = [a.name for a in node.names]
     elif isinstance(node, ast.ImportFrom):
@@ -137,7 +131,7 @@ def _inspect(node: ast.AST):
         return f"Użycie '{node.id}' jest niedozwolone", "Code_Execution"
     if isinstance(node, ast.Name) and node.id.startswith("__"):
         return f"Użycie nazwy specjalnej '{node.id}' jest niedozwolone", "Sandbox_Escape"
-    # __class__, __subclasses__, __globals__ itp. to klasyczna droga ucieczki z piaskownicy.
+    # __class__, __subclasses__, __globals__ etc. are classic sandbox escape vectors.
     if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
         return f"Dostęp do atrybutu '{node.attr}' jest niedozwolony", "Sandbox_Escape"
     if isinstance(node, ast.Attribute) and node.attr in INTROSPECTION_HELPERS:
@@ -151,3 +145,4 @@ def _inspect(node: ast.AST):
 
 def _helper_problem(name: str):
     return f"'{name}' czyta atrybuty po nazwie z napisu i omija blokadę atrybutów specjalnych", "Sandbox_Escape"
+

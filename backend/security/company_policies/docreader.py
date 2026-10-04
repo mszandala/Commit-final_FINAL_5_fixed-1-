@@ -1,10 +1,6 @@
-"""Odczyt dokumentów firmowych w Markdown.
+"""Reading company policy documents in Markdown format.
 
-Prototyp pracuje bezpośrednio na plikach .md. W docelowym systemie firma wgrywa dokumenty
-.docx/.pdf, a konwerter zamienia je na Markdown przed tym krokiem (zob. README, „Roadmapa”).
-To jedyne miejsce, które czyta pliki dokumentów, więc konwerter wpina się tutaj.
-
-Paragraf objęty kontrolą oznacza się linią `<!-- control: ID_REGUŁY -->` bezpośrednio nad nim.
+Controlled paragraphs are annotated with `<!-- control: RULE_ID -->` directly preceding them.
 """
 import re
 from dataclasses import dataclass, field
@@ -22,7 +18,7 @@ class DocParagraph:
 
 
 def read_paragraphs(path: Path) -> list[DocParagraph]:
-    """Niepuste linie dokumentu; znaczniki control: są przypisywane do najbliższej linii pod nimi."""
+    """Non-empty document lines; control tags are attached to the subsequent line."""
     path = Path(path)
     if path.suffix.lower() not in SUPPORTED:
         raise ValueError(f"{path.name}: nieobsługiwany format; prototyp czyta tylko "

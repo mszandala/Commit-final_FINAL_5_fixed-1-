@@ -8,18 +8,16 @@ def is_allowed(role: str, tool: str) -> bool:
 
 
 def role_areas(role: str) -> list[str]:
-    """Nazwy obszarów danych dostępnych dla roli — to pokazujemy modelowi zamiast nazw narzędzi."""
+    """Names of data areas accessible to role - shown to model instead of internal tool names."""
     allowed = set(ROLES.get(role, {}).get("allowed_tools", []))
     return [area["label"] for area in DATA_ACCESS.values() if set(area["tools"]) <= allowed]
 
 
 class ToolGate:
-    """Bramka dla agenta: przepuszcza narzędzia z whitelisty roli, resztę odrzuca.
+    """Agent tool gateway: permits whitelisted role tools, denies the rest.
 
-    Każde wywołanie trafia do `calls` jako {"tool", "args", "allowed"}, a odrzucone dodatkowo
-    z {"stage", "reason"} — z tego czyta interfejs.
-    Na razie każde naruszenie traktujemy jak błąd modelu (pracuje dalej bez narzędzia);
-    ocena intencji użytkownika (tool_violation_judge) dojdzie później.
+    Each call is appended to `calls` as {"tool", "args", "allowed"}, with denied calls
+    annotated with {"stage", "reason"} consumed by UI.
     """
 
     def __init__(self, role: str):
@@ -34,7 +32,7 @@ class ToolGate:
         allowed = is_allowed(self.role, name)
         call = {"tool": name, "args": args, "allowed": allowed}
         if not allowed:
-            call.update(stage="tool_whitelist", reason=f"Narzędzie niedostępne dla roli „{self.role}”")
+            call.update(stage="tool_whitelist", reason=f"Tool not permitted for role '{self.role}'")
         self.calls.append(call)
         if allowed:
             return None

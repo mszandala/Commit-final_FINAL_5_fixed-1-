@@ -34,10 +34,10 @@ def new_history() -> list:
 
 def run_agent(user_message: str, history: Optional[list] = None,
     tool_gate: Optional[ToolGate] = None, max_depth: int = 0, chat: Optional[Callable] = None) -> tuple[str, list]:
-    """Odpowiada na jedną wiadomość użytkownika.
+    """Answers a single user message.
 
-    Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
-    więc przy błędzie lub blokadzie wywołujący zostaje ze stanem sprzed wiadomości.
+    Returns (response, new_history). Passed history is not mutated in-place,
+    so on error or block the caller preserves the state from before the turn.
     """
     chat = chat or llm_client.chat      # scenariusze z atrapą modelu podają własną funkcję
     messages = list(history) if history else new_history()

@@ -2,22 +2,22 @@ import re
 
 from security.common.spans import by_position
 
-# Wzorce regex dla danych deterministycznych (hasła, sekrety, numery telefonów, e-maile)
+# Regex patterns for deterministic sensitive data (passwords, tokens, phone numbers, emails)
 PASSWORD_PATTERN = re.compile(
     r'(?:password|pwd|secret|api[_-]?key|token)(\s*[:=]\s*|\s+is\s+|\s+)(\S+)',
     re.IGNORECASE,
 )
-# Sekrety rozpoznawalne po samej budowie: token Bearer, JWT, klucz dostępowy AWS
+# Secrets recognizable by structural format: Bearer tokens, JWT, AWS access keys
 SECRET_TOKEN_PATTERN = re.compile(
     r'(?:(?<=Bearer )[A-Za-z0-9\-_.=+/]{20,}[A-Za-z0-9\-_=+/]'
     r'|\beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}'
     r'|\bAKIA[0-9A-Z]{16}\b)'
 )
 PHONE_PATTERN = re.compile(r'(\+?\d[\d\s\-\(\)]{7,}\d)')
-# Grupa 1 = domena; z tego samego wzorca company_policies sprawdza, czy adres jest wewnętrzny.
+# Group 1 = domain; company_policies verifies whether email is internal from this same pattern
 EMAIL_PATTERN = re.compile(r'[\w.+-]+@([\w-]+(?:\.[\w-]+)+)')
 CARD_PATTERN = re.compile(r'(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)')
-# Identyfikatory rekordów: sama liczba nic nie znaczy, więc wymagamy słowa kluczowego tuż przed nią.
+# Record IDs: requires explicit keyword prefix to avoid false-matching arbitrary numbers
 CLIENT_ID_PATTERN = re.compile(
     r'(?:customer[_ ]?id|client[_ ]?id|id\s+klienta|klient(?:a|em|owi)?\s+(?:o\s+)?(?:id|numerze))\D{0,12}?(\d{4,})',
     re.IGNORECASE,
@@ -28,7 +28,7 @@ EMPLOYEE_ID_PATTERN = re.compile(
 )
 
 
-# Zapisy dat i zakresów lat pasują do wzorca telefonu: 2024-01-05, 05-01-2024, 2018-2024, 2024 01 05.
+# Dates and year spans resembling phone formats: 2024-01-05, 05-01-2024, 2018-2024, 2024 01 05
 _DATE_LIKE = re.compile(
     r'(?:(?:19|20)\d{2}[-\s](?:0?[1-9]|1[0-2])[-\s](?:0?[1-9]|[12]\d|3[01])'
     r'|(?:0?[1-9]|[12]\d|3[01])[-\s](?:0?[1-9]|1[0-2])[-\s](?:19|20)\d{2}'
@@ -36,7 +36,7 @@ _DATE_LIKE = re.compile(
 )
 
 
-# PESEL: 11 cyfr. Bez słowa "PESEL" obok wymagamy poprawnej cyfry kontrolnej.
+# PESEL: 11 digits. Requires valid checksum digit unless preceded by "PESEL" keyword.
 PESEL_PATTERN = re.compile(r'(?<!\d)\d{11}(?!\d)')
 _PESEL_KEYWORD = re.compile(r'pesel[^0-9]{0,20}$', re.IGNORECASE)
 
@@ -47,12 +47,12 @@ def _pesel_ok(digits: str) -> bool:
 
 
 def in_decimal(text: str, start: int) -> bool:
-    """Czy ciąg cyfr zaczynający się w `start` to część ułamkowa liczby (np. 22.459157718), a nie numer."""
+    """Whether digit sequence starting at `start` is a fractional part of a decimal (e.g. 22.459157718)."""
     return 2 <= start <= len(text) and text[start - 1] in ".," and text[start - 2].isdigit()
 
 
 def is_date_like(text: str) -> bool:
-    """Czy ciąg cyfr to data albo zakres lat, a nie numer telefonu."""
+    """Whether digit sequence is a date or year span rather than a phone number."""
     return bool(_DATE_LIKE.fullmatch(text.strip()))
 
 
@@ -67,10 +67,9 @@ def _luhn_ok(digits: str) -> bool:
 
 
 def detect_regex_pii(text: str) -> list[dict]:
-    """Wykrywa dane wrażliwe za pomocą reguł regex: hasła/tokeny, e-maile, telefony.
+    """Detects sensitive entities via deterministic regex: passwords, emails, phones, IDs.
 
-    Zwraca listę encji: [{"type", "text", "start", "end"}], posortowaną wg pozycji w tekście.
-    Czas wykonania: < 0.1ms.
+    Returns sorted list of entities: [{"type", "text", "start", "end"}].
     """
     if not text or not text.strip():
         return []

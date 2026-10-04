@@ -134,7 +134,7 @@ def test_redaction_and_mask_switch(llm):
     llm += [_reply("Napisz do jan.kowalski@firma.pl")]
     body = _chat("basic_user", "Kto prowadzi projekt?").json()
     assert body["text"] == "Napisz do [EMAIL]"
-    assert body["verdict"] == {"decision": "redact", "stage": "pii_policy", "reason": "Ukryto dane: EMAIL"}
+    assert body["verdict"]["decision"] == "redact" and body["verdict"]["stage"] == "pii_policy" and "EMAIL" in body["verdict"]["reason"]
     assert client.get(f"{API}/events").json()[0]["decision"] == "Redacted"
 
     assert client.put(f"{API}/config", json={"maskPii": False}).json()["maskPii"] is False

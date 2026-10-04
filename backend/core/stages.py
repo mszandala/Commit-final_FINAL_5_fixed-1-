@@ -14,10 +14,10 @@ from typing import Callable, Iterable, Optional
 
 from audit import logger as audit
 from security.common.verdicts import Verdict
-from security.intent_classifier import CATEGORIES_PL as INTENT_CATEGORIES, IN_SCOPE, classify_intent
+from security.intent_classifier import CATEGORIES as INTENT_CATEGORIES, IN_SCOPE, classify_intent
 from security.pii.regex_detector import detect_regex_pii
 from security.prompt_guard import check_prompt
-from security.refusal_detector import CATEGORIES_PL as REFUSAL_CATEGORIES, assess_refusal
+from security.refusal_detector import CATEGORIES as REFUSAL_CATEGORIES, assess_refusal
 
 from .company import record_check, soften
 from .context import TurnContext
@@ -32,7 +32,7 @@ def block(stage: str, reason: str) -> dict:
 
 
 def _clean(reason: str) -> str:
-    return reason.replace("[OSTRZEŻENIE PROMPT GUARD] ", "")
+    return reason.replace("[OSTRZEŻENIE PROMPT GUARD] ", "").replace("[PROMPT GUARD WARNING] ", "")
 
 
 @lru_cache(maxsize=16)
@@ -79,20 +79,20 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
 
     # Model spoza listy dozwolonych: tura nie rusza, zanim cokolwiek zobaczy jakikolwiek model.
     if model is not None and not policy.is_model_allowed(model):
-        reason = f"Model „{model}” nie jest dozwolony przez politykę"
+        reason = f"Model '{model}' is not allowed by policy"
         audit.record("model_policy", "security", model=model, allowed=False)
-        return RequestDecision(True, f"Zapytanie zostało zablokowane: {reason}", block("model_policy", reason),
+        return RequestDecision(True, f"Request blocked: {reason}", block("model_policy", reason),
                                logged_prompt(ctx, user_message))
 
     # 0. Długość promptu: zbyt długi nie trafia do żadnego modelu, także do strażników.
     max_chars = policy.controls.prompt_length.max_chars
     if policy.filter_on("prompt_length") and len(user_message) > max_chars:
-        reason = f"Zapytanie ma {len(user_message)} znaków; limit to {max_chars}"
+        reason = f"Prompt has {len(user_message)} characters; limit is {max_chars}"
         audit.record("prompt_length", "security", chars=len(user_message), limit=max_chars)
         excerpt = logged_prompt(ctx, user_message[:LOGGED_EXCERPT_CHARS])
         return RequestDecision(
-            True, f"Zapytanie zostało zablokowane: {reason}", block("prompt_length", reason),
-            f"{excerpt} [... {len(user_message) - LOGGED_EXCERPT_CHARS} znaków pominięto]")
+            True, f"Request blocked: {reason}", block("prompt_length", reason),
+            f"{excerpt} [... {len(user_message) - LOGGED_EXCERPT_CHARS} characters omitted]")
 
     # 1. Strażnik promptu (strefa bezpieczeństwa, dane surowe): wzorce regex jako pierwszy sygnał, potem
     #    klasyfikator intencji. Gdy klasyfikator działa, to on rozstrzyga — słowa kluczowe same już tylko
@@ -122,7 +122,7 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
                      reason=guard_reason if violation else None, error=intent["error"])
     if guard_blocks:
         reason = guard_reason or _clean(guard.reason)
-        return RequestDecision(True, f"Zapytanie zostało zablokowane: {reason}", block("prompt_guard", reason),
+        return RequestDecision(True, f"Request blocked: {reason}", block("prompt_guard", reason),
                                logged_prompt(ctx, user_message), guard=guard, flagged=flagged,
                                guard_reason=guard_reason)
 
@@ -134,7 +134,7 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
                                    ctx.engine.check_input(conv.role, user_message), point="input")
         record_check("input", checked, softened)
         if checked.decision == "block":
-            return RequestDecision(True, f"Zapytanie zostało zablokowane: {checked.reason}",
+            return RequestDecision(True, f"Request blocked: {checked.reason}",
                                    block(checked.stage, checked.reason), logged_prompt(ctx, user_message),
                                    guard=guard, flagged=flagged, guard_reason=guard_reason)
         if checked.decision == "redact":
@@ -147,8 +147,8 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
                                                    threshold=threshold)
     if blocked:
         types = ", ".join(sorted({e["type"] for e in entities if e["decision"] == "block"}))
-        reason = f"Zapytanie zawiera dane, których nie wolno wysyłać do modelu: {types}"
-        return RequestDecision(True, f"Zapytanie zostało zablokowane: {reason}", block("pii_policy", reason),
+        reason = f"Request contains sensitive data not allowed to be sent to model: {types}"
+        return RequestDecision(True, f"Request blocked: {reason}", block("pii_policy", reason),
                                masked_prompt, entities, guard, flagged, guard_reason, policy_note)
     conv.user_texts.append(user_message)
     return RequestDecision(False, masked_prompt=masked_prompt, entities=entities, guard=guard,
@@ -183,8 +183,8 @@ def check_response(ctx: TurnContext, raw_reply: str, user_message: str, request:
                  tool_names_hidden=hidden)
     if output["blocked"]:
         types = ", ".join(sorted(set(output["blocked"])))
-        reason = f"Odpowiedź zawiera dane, do których rola „{conv.role}” nie ma dostępu: {types}"
-        return ResponseDecision(True, f"Odpowiedź została zablokowana: {reason}", logged_reply, output,
+        reason = f"Response contains data that role '{conv.role}' is not allowed to access: {types}"
+        return ResponseDecision(True, f"Response blocked: {reason}", logged_reply, output,
                                 block("pii_policy", reason))
 
     policy_note = request.policy_note
@@ -194,7 +194,7 @@ def check_response(ctx: TurnContext, raw_reply: str, user_message: str, request:
                                    public_only=not conv.private_context)
         record_check("output", checked, softened)
         if checked.decision == "block":
-            return ResponseDecision(True, f"Odpowiedź została zablokowana: {checked.reason}", logged_reply,
+            return ResponseDecision(True, f"Response blocked: {checked.reason}", logged_reply,
                                     output, block(checked.stage, checked.reason))
         if checked.decision == "redact":
             reply = checked.details.get("redacted_text") or reply
@@ -213,15 +213,15 @@ def check_response(ctx: TurnContext, raw_reply: str, user_message: str, request:
                      after_denied_tools=denied_tools)
     refusal = None
     if found and found["refusal"]:
-        cause = (f"po odrzuceniu narzędzia: {', '.join(denied_tools)}" if denied_tools
+        cause = (f"after tool denied: {', '.join(denied_tools)}" if denied_tools
                  else REFUSAL_CATEGORIES[found["category"]])
-        refusal = {"decision": "refuse", "stage": "chatbot_refusal", "reason": f"Chatbot odmówił ({cause})"}
+        refusal = {"decision": "refuse", "stage": "chatbot_refusal", "reason": f"Chatbot declined ({cause})"}
 
     # Jedna decyzja na turę, od najmocniejszej: ukrycie (PII, potem regulaminy), ostrzeżenie, odmowa chatbota.
     verdict = None
     if output["redacted"]:
         types = ", ".join(sorted(set(output["redacted"])))
-        verdict = {"decision": "redact", "stage": "pii_policy", "reason": f"Ukryto dane: {types}"}
+        verdict = {"decision": "redact", "stage": "pii_policy", "reason": f"Redacted sensitive data: {types}"}
     elif policy_note and policy_note["decision"] == "redact":
         verdict = policy_note
     elif request.flagged:
