@@ -12,8 +12,9 @@ backend/audit/*.db
 backend/audit/*.db-*
 policy/*.overrides.json
 
-# Dane montowane z hosta (1,7 GB, w większości pliki Git LFS)
-backend/data
+# Dane giełdowe: 1,9 GB z Git LFS, obraz ich nie potrzebuje (compose montuje pełny katalog data z hosta).
+# Reszta danych (ok. 16 MB) jest w obrazie, więc działa też wdrożenie bez montowania (np. Render).
+backend/data/stock_market
 
 # Cache i artefakty
 **/__pycache__
