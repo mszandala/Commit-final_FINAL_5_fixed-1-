@@ -7,7 +7,9 @@ graphify-out
 .env
 **/.env
 backend/spending.db
-backend/audit
+backend/audit/*.jsonl
+backend/audit/*.db
+backend/audit/*.db-*
 policy/*.overrides.json
 
 # Dane montowane z hosta (1,7 GB, w większości pliki Git LFS)
