@@ -1,9 +1,10 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronRight } from 'lucide-react'
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber } from '../format'
 import { useMeta } from '../meta'
 import SearchBox from './SearchBox'
+import TimeRange, { bounds, useNow } from './TimeRange'
 import { advancedMatcher, plainMatcher } from './search'
 
 // The backend grades every turn and every step: info (nothing to report), warn (flagged or
@@ -35,17 +36,41 @@ const ZONE_TAGS = {
   local: 'bg-teal/25',
 }
 
+// `sort` reads the value a column sorts by. Numbers and time sort largest first on the first click,
+// text A to Z.
 const COLUMNS = [
   { label: '' },
-  { label: 'Time' },
-  { label: 'User' },
-  { label: 'Role' },
-  { label: 'Control' },
-  { label: 'Reason' },
-  { label: 'Steps', numeric: true },
-  { label: 'Tokens', numeric: true },
-  { label: 'Latency', numeric: true },
+  { label: 'Time', sort: (e) => e.time.getTime(), first: 'desc' },
+  { label: 'User', sort: (e) => e.user },
+  { label: 'Role', sort: (e) => e.role },
+  { label: 'Control', sort: (e) => e.control },
+  { label: 'Reason', sort: (e) => e.reason },
+  { label: 'Steps', numeric: true, sort: (e) => e.stepCount },
+  { label: 'Tokens', numeric: true, sort: (e) => e.tokens },
+  { label: 'Latency', numeric: true, sort: (e) => e.latencyMs },
 ]
+const COLUMN_BY_LABEL = Object.fromEntries(COLUMNS.map((c) => [c.label, c]))
+const firstDir = (c) => c.first ?? (c.numeric ? 'desc' : 'asc')
+const NEWEST_FIRST = { column: 'Time', dir: 'desc' }
+
+// Above this many rows the headers stop sorting and the log stays newest first.
+const SORT_LIMIT = 1000
+const SORT_OFF = `Sorting works with up to ${formatNumber(SORT_LIMIT)} rows; narrow the time range or filters`
+
+const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true })
+
+// Empty text goes last in either direction; ties keep the newest first.
+function sortRows(rows, { column, dir }) {
+  const get = COLUMN_BY_LABEL[column].sort
+  const sign = dir === 'asc' ? 1 : -1
+  return rows.toSorted((a, b) => {
+    const x = get(a)
+    const y = get(b)
+    if ((x === '') !== (y === '')) return x === '' ? 1 : -1
+    const order = typeof x === 'string' ? collator.compare(x, y) : x - y
+    return order * sign || b.id - a.id
+  })
+}
 
 const timeOf = (d) => d.toLocaleTimeString('en-GB')
 const dateOf = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
@@ -100,6 +125,10 @@ export default function Logs({ initial = {} }) {
   const [level, setLevel] = useState(initial.level ?? 'info')
   const [kind, setKind] = useState(initial.kind ?? 'all')
   const [zone, setZone] = useState('all')
+  // The dashboard counts the whole log, so a row it opens may be older than a day.
+  const [range, setRange] = useState(() => ({ preset: Object.keys(initial).length ? 'all' : '24h' }))
+  const now = useNow(range)
+  const [sort, setSort] = useState(NEWEST_FIRST)
   // Each mode keeps its own query, so switching away and back finds the old one still there.
   const [queries, setQueries] = useState({ plain: '', advanced: initial.query ?? '' })
   const [advanced, setAdvanced] = useState(initial.query !== undefined)
@@ -141,55 +170,74 @@ export default function Logs({ initial = {} }) {
   const narrowed = kind !== 'all' || zone !== 'all'
   const stepMatches = (s) =>
     RANK[s.level] >= RANK[level] && (kind === 'all' || s.kind === kind) && (zone === 'all' || s.zone === zone)
-  // The API sends the oldest first; the log shows the newest on top.
-  const events = all
-    .filter((e) => search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]))
+  const [start, end] = bounds(range, now)
+  const inRange = (e) => (start === null || e.time >= start) && (end === null || e.time < end)
+  // The API sends the oldest first; the log shows the newest on top unless a column says otherwise.
+  const matching = all
+    .filter(
+      (e) => inRange(e) && search.match(e) && (narrowed ? e.steps.some(stepMatches) : RANK[e.level] >= RANK[level]),
+    )
     .reverse()
+  const canSort = matching.length <= SORT_LIMIT
+  const order = canSort ? sort : NEWEST_FIRST
+  const events = order === NEWEST_FIRST ? matching : sortRows(matching, order)
+  const onSort = (c) =>
+    setSort(
+      sort.column === c.label
+        ? { column: c.label, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+        : c.label === NEWEST_FIRST.column && firstDir(c) === NEWEST_FIRST.dir
+          ? NEWEST_FIRST
+          : { column: c.label, dir: firstDir(c) },
+    )
   const isOpen = (e) => toggled[e.id] ?? (expandAll || narrowed || found.has(e.id))
 
   // Keep the view on the newest events when the log or the filters change.
   useLayoutEffect(() => {
     scroller.current.scrollTop = 0
-  }, [level, kind, zone, search, all])
+  }, [level, kind, zone, search, all, range, sort])
 
   return (
     <div className="flex h-full flex-col">
       {/* Advanced search takes the whole first row and pushes the filters below it. Plain search
-          moves to its own row only when the window is too narrow for it. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 px-6 py-4">
-        <div role="group" aria-label="Level" className="flex shrink-0 gap-1">
-          {LEVELS.map((l) => (
-            <button
-              key={l.id}
-              aria-pressed={level === l.id}
-              onClick={() => setLevel(l.id)}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${
-                level === l.id ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
+          moves to its own row only when the window is too narrow for it. The time range sits on
+          a row of its own under them. */}
+      <div className="flex shrink-0 flex-col items-start gap-3 px-6 py-4">
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-3">
+          <div role="group" aria-label="Level" className="flex shrink-0 gap-1">
+            {LEVELS.map((l) => (
+              <button
+                key={l.id}
+                aria-pressed={level === l.id}
+                onClick={() => setLevel(l.id)}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${
+                  level === l.id ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'
+                }`}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+          <Select label="Step" value={kind} onChange={setKind} options={meta.stepKinds} />
+          <Select label="Zone" value={zone} onChange={setZone} options={meta.zones} />
+          <button
+            aria-pressed={expandAll}
+            onClick={() => {
+              setExpandAll(!expandAll)
+              setToggled({})
+            }}
+            className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
+          >
+            {expandAll ? 'Collapse all' : 'Expand all'}
+          </button>
+          <SearchBox
+            value={query}
+            onChange={setQuery}
+            advanced={advanced}
+            onToggle={() => setAdvanced(!advanced)}
+            error={result.error}
+          />
         </div>
-        <Select label="Step" value={kind} onChange={setKind} options={meta.stepKinds} />
-        <Select label="Zone" value={zone} onChange={setZone} options={meta.zones} />
-        <button
-          aria-pressed={expandAll}
-          onClick={() => {
-            setExpandAll(!expandAll)
-            setToggled({})
-          }}
-          className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-sm ${expandAll ? 'bg-blue-light text-ink' : 'text-grey hover:bg-white'}`}
-        >
-          {expandAll ? 'Collapse all' : 'Expand all'}
-        </button>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          advanced={advanced}
-          onToggle={() => setAdvanced(!advanced)}
-          error={result.error}
-        />
+        <TimeRange range={range} onChange={setRange} now={now} events={all} />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
@@ -199,16 +247,44 @@ export default function Logs({ initial = {} }) {
           <table className="w-full border-separate border-spacing-0 text-sm tabular-nums [&_tbody_tr:last-child_td]:border-b-0">
             <thead>
               <tr>
-                {COLUMNS.map((c, i) => (
-                  <th
-                    key={i}
-                    className={`sticky top-0 z-10 border-b border-line bg-white px-2.5 py-2 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
-                      c.numeric ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    {c.label}
-                  </th>
-                ))}
+                {COLUMNS.map((c, i) => {
+                  const active = order.column === c.label
+                  const Arrow = (active ? order.dir : firstDir(c)) === 'asc' ? ArrowUp : ArrowDown
+                  // The arrow sits on the inner side, so labels keep their edge; it holds its
+                  // place while hidden, so headers don't shift on hover.
+                  const label = (
+                    <>
+                      {c.label}
+                      <Arrow size={12} className={active ? '' : 'invisible group-hover:visible'} />
+                    </>
+                  )
+                  return (
+                    <th
+                      key={i}
+                      aria-sort={active ? (order.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                      className={`sticky top-0 z-10 border-b border-line bg-white px-2.5 py-2 text-[13px] font-normal text-grey first:pl-4 last:pr-4 ${
+                        c.numeric ? 'text-right' : 'text-left'
+                      }`}
+                    >
+                      {!c.sort ? (
+                        c.label
+                      ) : canSort ? (
+                        <button
+                          onClick={() => onSort(c)}
+                          className={`group inline-flex items-center gap-1 hover:text-ink ${c.numeric ? 'flex-row-reverse' : ''} ${
+                            active ? 'text-ink' : ''
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ) : (
+                        <span title={SORT_OFF} className={`inline-flex items-center gap-1 ${c.numeric ? 'flex-row-reverse' : ''}`}>
+                          {label}
+                        </span>
+                      )}
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>

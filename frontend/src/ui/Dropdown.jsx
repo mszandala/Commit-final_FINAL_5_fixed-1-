@@ -10,6 +10,11 @@ const VARIANTS = {
       'flex w-full items-center justify-between rounded-md border border-line bg-white px-2.5 py-1.5 text-left text-sm outline-none focus-visible:border-blue aria-expanded:border-blue',
     panel: 'w-full',
   },
+  filter: {
+    trigger:
+      'flex shrink-0 items-center gap-2 rounded-md border border-line bg-white px-2.5 py-1.5 text-sm outline-none focus-visible:border-blue aria-expanded:border-blue',
+    panel: '',
+  },
   cell: {
     trigger:
       'flex max-w-full items-start gap-1.5 rounded-md border border-transparent px-2 py-1 text-left hover:border-line hover:bg-white aria-expanded:border-blue aria-expanded:bg-white',
@@ -49,7 +54,7 @@ export default function Dropdown({ trigger, label, variant = 'menu', placement =
         {trigger}
       </button>
       {open && (
-        <div className={`absolute left-0 z-10 rounded-md border border-line bg-white shadow-sm ${PLACEMENTS[placement]} ${VARIANTS[variant].panel}`}>
+        <div className={`absolute left-0 z-20 rounded-md border border-line bg-white shadow-sm ${PLACEMENTS[placement]} ${VARIANTS[variant].panel}`}>
           {children(() => setOpen(false))}
         </div>
       )}
