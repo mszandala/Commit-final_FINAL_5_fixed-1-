@@ -1,17 +1,18 @@
 """Rozpoznawanie intencji: czy zapytanie mieści się w pracy roli użytkownika.
 
 Klasyfikator LLM w strefie bezpieczeństwa (widzi dane surowe). Dostaje opis roli i obszary danych
-z config.ROLES / DATA_ACCESS, poprzednie wiadomości użytkownika (żeby dopytanie "a ile to razem?"
+z polityki (config.ROLES / DATA_ACCESS bez niej), poprzednie wiadomości użytkownika (żeby dopytanie "a ile to razem?"
 nie było oceniane w oderwaniu) i wynik strażnika regex jako podpowiedź.
 """
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from chatbot import llm_client
-from config import DATA_ACCESS, ROLES
-from security.tool_whitelist import role_areas
+
+if TYPE_CHECKING:
+    from core.models import Policy
 
 _PROMPT = (Path(__file__).parent / "prompts" / "intent_classifier.txt").read_text(encoding="utf-8")
 
@@ -33,14 +34,28 @@ MAX_PREVIOUS = 3          # tyle wcześniejszych wiadomości użytkownika widzi 
 MAX_CHARS = 2000          # dłuższe wiadomości są dla klasyfikatora przycinane
 
 
-def classify_intent(role: str, prompt: str, previous=(), hint: Optional[str] = None) -> dict:
+def _role_context(role: str, policy: Optional["Policy"]) -> tuple[str, list[str], list[str]]:
+    """(opis roli, dostępne obszary danych, obszary niedostępne) z polityki; bez niej z config.py."""
+    if policy is not None:
+        cfg = policy.role(role)
+        allowed = policy.role_areas(role)
+        return (cfg.description if cfg else ""), allowed, [a.label for a in policy.areas.values()
+                                                           if a.label not in allowed]
+    import config
+    from security.tool_whitelist import role_areas
+    allowed = role_areas(role)
+    return (config.ROLES.get(role, {}).get("description", ""), allowed,
+            [a["label"] for a in config.DATA_ACCESS.values() if a["label"] not in allowed])
+
+
+def classify_intent(role: str, prompt: str, previous=(), hint: Optional[str] = None,
+                    policy: Optional["Policy"] = None) -> dict:
     """Zwraca {"category", "reason", "error"}. Gdy klasyfikator zawiedzie albo odpowie nieczytelnie,
     `category` jest None, a `error` mówi dlaczego — decyzję podejmuje wtedy sam strażnik regex."""
-    allowed = role_areas(role)
-    restricted = [a["label"] for a in DATA_ACCESS.values() if a["label"] not in allowed]
+    description, allowed, restricted = _role_context(role, policy)
     message = _PROMPT.format(
         role=role,
-        role_description=ROLES.get(role, {}).get("description", ""),
+        role_description=description,
         allowed_areas=", ".join(allowed) or "none",
         restricted_areas=", ".join(restricted) or "none",
         previous="\n".join(f"- {p[:MAX_CHARS]}" for p in list(previous)[-MAX_PREVIOUS:]) or "(none)",

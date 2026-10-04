@@ -1,9 +1,11 @@
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from config import RESOURCE_TOOLS, ROLES
 from security.common.roles import normalize_role
 from security.common.verdicts import Verdict
+
+if TYPE_CHECKING:
+    from core.models import Policy
 
 # Wzorzec "polecenie ignorowania": czasownik, do czterech słów dookreślających ("all previous", "wszystkie
 # poprzednie", "o wszystkich") i rzecz, którą się ignoruje. Krótszy wzorzec z jednym słowem dookreślającym
@@ -67,21 +69,34 @@ def _check_heuristic_injections(text: str) -> Optional[str]:
     return None
 
 
-def _check_role_resource_access(canonical_role: str, text: str) -> Optional[tuple[str, str]]:
+def _role_access(canonical_role: str, policy: Optional["Policy"]) -> tuple[set, dict]:
+    """(narzędzia roli, narzędzia każdego zasobu) z polityki; bez polityki z config.py (tryb zgodności)."""
+    if policy is not None:
+        cfg = policy.role(canonical_role)
+        return (set(cfg.allowed_tools) if cfg else set()), policy.resources
+    import config
+    return set(config.ROLES.get(canonical_role, {}).get("allowed_tools", [])), config.RESOURCE_TOOLS
+
+
+def _check_role_resource_access(canonical_role: str, text: str,
+                                policy: Optional["Policy"] = None) -> Optional[tuple[str, str]]:
     """Sprawdza, czy zapytanie dotyczy zasobu, którego narzędzi rola nie ma w allowed_tools."""
-    allowed_tools = set(ROLES.get(canonical_role, {}).get("allowed_tools", []))
+    allowed_tools, resource_tools = _role_access(canonical_role, policy)
     text_lower = text.lower()
 
     for resource, keywords in RESOURCE_KEYWORDS.items():
         if not any(k in text_lower for k in keywords):
             continue
-        if allowed_tools.isdisjoint(RESOURCE_TOOLS[resource]):
+        tools = resource_tools.get(resource)
+        if tools and allowed_tools.isdisjoint(tools):       # zasób bez przypisanych narzędzi nie ogranicza roli
             return resource, f"Rola '{canonical_role}' nie ma dostępu do {RESOURCE_LABELS[resource]}."
     return None
 
 
-def check_prompt(role: str, user_prompt: str) -> Verdict:
+def check_prompt(role: str, user_prompt: str, policy: Optional["Policy"] = None) -> Verdict:
     """Ocenia zapytanie użytkownika pod kątem bezpieczeństwa i zgodności z rolą.
+
+    Role i zasoby bierze z `policy`; bez niej z config.py (tryb zgodności dla starszych wywołań).
 
     Zgodnie z wymaganiem PoC:
       - Mechanizm NIE blokuje zapytania (is_blocked = False).
@@ -117,7 +132,7 @@ def check_prompt(role: str, user_prompt: str) -> Verdict:
         )
 
     # 2. Sprawdzenie zgodności żądanego zasobu z rolą (RBAC Scope)
-    resource_violation = _check_role_resource_access(canonical_role, clean_prompt)
+    resource_violation = _check_role_resource_access(canonical_role, clean_prompt, policy)
     if resource_violation:
         resource_name, violation_reason = resource_violation
         return Verdict(

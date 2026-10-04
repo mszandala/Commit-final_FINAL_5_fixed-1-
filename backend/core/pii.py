@@ -89,7 +89,7 @@ def mask_prompt(conv: Conversation, prompt: str, *, policy: Policy, detect: Dete
         if action == "judge":
             pending.append(e)
     if pending and policy.controls.pii.judge_enabled:
-        for e, decision in zip(pending, judge_entities(conv.role, prompt, pending)):
+        for e, decision in zip(pending, judge_entities(conv.role, prompt, pending, policy=policy)):
             e["decision"] = decision
 
     blocked = any(e["decision"] == "block" for e in entities)
@@ -153,7 +153,7 @@ def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts
     # Typy, które w kanale chatbota rozstrzyga sędzia (imię i nazwisko, kwota), ocenia on także tutaj.
     doubtful = [e for e in to_replace if e["action"] == "redact" and policy.chatbot_action(e["type"]) == "judge"]
     if judge and doubtful:
-        for e, decision in zip(doubtful, judge_reply_entities(role, text, doubtful)):
+        for e, decision in zip(doubtful, judge_reply_entities(role, text, doubtful, policy=policy)):
             if decision == "keep":
                 e["action"] = "exempt"
                 exempted.append(e["type"])

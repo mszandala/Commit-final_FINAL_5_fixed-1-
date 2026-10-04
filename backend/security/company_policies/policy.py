@@ -6,9 +6,9 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
-from config import COMPANY_DOCUMENTS_DIR, COMPANY_FIXTURES_DIR, ROLES
+from config import COMPANY_DOCUMENTS_DIR, COMPANY_FIXTURES_DIR
 from security.company_policies.docreader import SUPPORTED, DocParagraph, read_paragraphs, read_text
 from security.common.roles import normalize_role
 
@@ -220,22 +220,32 @@ def _choice(value: str, options: tuple, what: str) -> str:
     return v
 
 
-def _roles(value: str, what: str) -> tuple[str, ...]:
+def _known_roles(known_roles: Optional[Callable[[], Iterable[str]]]) -> list[str]:
+    """Role, które reguły mogą wymieniać: z podanego źródła (np. polityka), a bez niego z config.py."""
+    if known_roles is not None:
+        return list(known_roles())
+    import config
+    return list(config.ROLES)
+
+
+def _roles(value: str, what: str, known_roles: Optional[Callable[[], Iterable[str]]] = None) -> tuple[str, ...]:
     items = _list(value)
     if items == ("none",):
         return ()
     if items == ("*",):
         return ("*",)
     roles = []
+    known = _known_roles(known_roles)
     for item in items:
         role = normalize_role(item)
-        if role not in ROLES:
-            raise PolicyError(f"{what}: nieznana rola '{item}' (dostępne: {', '.join(ROLES)})")
+        if role not in known:
+            raise PolicyError(f"{what}: nieznana rola '{item}' (dostępne: {', '.join(known)})")
         roles.append(role)
     return tuple(roles)
 
 
-def _rule(fields: dict, documents: _Documents, fixtures_dir: Path) -> Rule:
+def _rule(fields: dict, documents: _Documents, fixtures_dir: Path,
+          known_roles: Optional[Callable[[], Iterable[str]]] = None) -> Rule:
     rule_id = fields["Rule"]
     what = f"reguła {rule_id}"
     missing = REQUIRED_RULE_KEYS - fields.keys()
@@ -292,7 +302,7 @@ def _rule(fields: dict, documents: _Documents, fixtures_dir: Path) -> Rule:
         category=fields["Category"],
         classification=_choice(fields["Classification"], CLASSIFICATIONS, f"{what}: Classification"),
         description=fields.get("Description", ""),
-        allowed_roles=_roles(fields["Allowed Roles"], f"{what}: Allowed Roles"),
+        allowed_roles=_roles(fields["Allowed Roles"], f"{what}: Allowed Roles", known_roles),
         external_llm=_choice(fields.get("External LLM", "block"), USAGE, f"{what}: External LLM"),
         external_destinations=_choice(
             fields.get("External Destinations", "block"), USAGE, f"{what}: External Destinations"),
@@ -349,7 +359,8 @@ def _semantic_categories(rules: tuple[Rule, ...]) -> dict[str, str]:
 
 
 def parse_policy(text: str, documents_dir: Path = DEFAULT_DOCUMENTS_DIR,
-                 fixtures_dir: Path = DEFAULT_FIXTURES_DIR) -> Policy:
+                 fixtures_dir: Path = DEFAULT_FIXTURES_DIR,
+                 known_roles: Optional[Callable[[], Iterable[str]]] = None) -> Policy:
     documents, fixtures_dir = _Documents(documents_dir), Path(fixtures_dir)
     blocks = _blocks(text)
     if not blocks:
@@ -362,7 +373,7 @@ def parse_policy(text: str, documents_dir: Path = DEFAULT_DOCUMENTS_DIR,
     for block in blocks[1:]:
         if block[0][1] != "Rule":
             raise PolicyError(f"linia {block[0][0]}: blok reguły musi zaczynać się od 'Rule:'")
-        rule = _rule(_fields(block, RULE_KEYS, f"regule z linii {block[0][0]}"), documents, fixtures_dir)
+        rule = _rule(_fields(block, RULE_KEYS, f"regule z linii {block[0][0]}"), documents, fixtures_dir, known_roles)
         if any(r.id == rule.id for r in rules):
             raise PolicyError(f"powtórzony identyfikator reguły {rule.id}")
         rules.append(rule)
@@ -419,8 +430,10 @@ class PolicyStore:
 
     def __init__(self, path: Path = DEFAULT_RULES_PATH, on_event: Optional[Callable[[dict], None]] = None,
                  documents_dir: Path = DEFAULT_DOCUMENTS_DIR, fixtures_dir: Path = DEFAULT_FIXTURES_DIR,
-                 reload_interval: float = DEFAULT_RELOAD_INTERVAL):
+                 reload_interval: float = DEFAULT_RELOAD_INTERVAL,
+                 known_roles: Optional[Callable[[], Iterable[str]]] = None):
         self.path = Path(path)
+        self.known_roles = known_roles
         self.documents_dir = Path(documents_dir)
         self.fixtures_dir = Path(fixtures_dir)
         self.reload_interval = reload_interval
@@ -442,14 +455,16 @@ class PolicyStore:
         except OSError as e:
             self._fail(f"nie można odczytać {self.path.name}: {e}", None)
             return self._policy
-        signature = (raw, self._files_signature())
+        # Zmiana listy ról (np. w pliku polityki) wymusza ponowną walidację reguł.
+        signature = (raw, self._files_signature(), tuple(self.known_roles()) if self.known_roles else None)
         if signature == self._signature:
             return self._policy
 
         with self._lock:
             if signature != self._signature:
                 try:
-                    policy = parse_policy(raw.decode("utf-8"), self.documents_dir, self.fixtures_dir)
+                    policy = parse_policy(raw.decode("utf-8"), self.documents_dir, self.fixtures_dir,
+                                          self.known_roles)
                 except (PolicyError, UnicodeDecodeError, OSError) as e:
                     self._fail(str(e), signature)
                 else:

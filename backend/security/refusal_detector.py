@@ -10,7 +10,8 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from types import SimpleNamespace
+from typing import Any, Optional
 
 from chatbot import llm_client
 from config import REFUSAL_EMBEDDINGS_ENABLED, REFUSAL_MODEL, REFUSAL_THRESHOLD, REFUSAL_TRIGGER_THRESHOLD
@@ -76,7 +77,16 @@ def sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE.split(text) if len(s.strip()) > 3]
 
 
-def load_model():
+def _settings(settings: Optional[Any] = None):
+    """Ustawienia wykrywania: z polityki (`controls.refusal_detection`) albo, bez niej, stałe tego modułu
+    z config.py (tryb zgodności; testy podmieniają te stałe)."""
+    if settings is not None:
+        return settings
+    return SimpleNamespace(embeddings_enabled=REFUSAL_EMBEDDINGS_ENABLED, model=REFUSAL_MODEL,
+                           threshold=REFUSAL_THRESHOLD, trigger_threshold=REFUSAL_TRIGGER_THRESHOLD)
+
+
+def load_model(model_name: Optional[str] = None):
     """Model embeddingów z tokenizerem wczytanym wprost z jego pliku tokenizer.json.
 
     Automatyczny wybór tokenizera w części wersji transformers bierze dla tego modelu klasę
@@ -86,11 +96,12 @@ def load_model():
     from sentence_transformers import SentenceTransformer
     from transformers import PreTrainedTokenizerFast
 
-    model = SentenceTransformer(REFUSAL_MODEL)
+    name = model_name or REFUSAL_MODEL
+    model = SentenceTransformer(name)
     try:
-        folder = Path(snapshot_download(REFUSAL_MODEL, allow_patterns=["tokenizer.json"], local_files_only=True))
+        folder = Path(snapshot_download(name, allow_patterns=["tokenizer.json"], local_files_only=True))
     except Exception:
-        folder = Path(snapshot_download(REFUSAL_MODEL, allow_patterns=["tokenizer.json"]))
+        folder = Path(snapshot_download(name, allow_patterns=["tokenizer.json"]))
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_file=str(folder / "tokenizer.json"), bos_token="<s>", eos_token="</s>", unk_token="<unk>",
         sep_token="</s>", pad_token="<pad>", cls_token="<s>", mask_token="<mask>")
@@ -101,11 +112,11 @@ def load_model():
     return model
 
 
-@lru_cache(maxsize=1)
-def _embedder():
+@lru_cache(maxsize=2)
+def _embedder_for(model_name: str):
     """(model, wektory wzorców, kategorie wzorców) albo None, gdy modelu nie da się wczytać."""
     try:
-        model = load_model()
+        model = load_model(model_name)
         labels = [category for category, group in EXEMPLARS.items() for _ in group]
         vectors = model.encode([e for group in EXEMPLARS.values() for e in group],
                                normalize_embeddings=True, show_progress_bar=False)
@@ -115,14 +126,22 @@ def _embedder():
         return None
 
 
+def _embedder(model_name: Optional[str] = None):
+    return _embedder_for(model_name or REFUSAL_MODEL)
+
+
+_embedder.cache_clear = _embedder_for.cache_clear
+
+
 def warm_up() -> None:
     if REFUSAL_EMBEDDINGS_ENABLED:
-        _embedder()
+        _embedder(REFUSAL_MODEL)
 
 
-def _nearest(text: str) -> Optional[tuple[float, str]]:
+def _nearest(text: str, settings: Optional[Any] = None) -> Optional[tuple[float, str]]:
     """Największe podobieństwo któregokolwiek zdania do wzorca odmowy i kategoria tego wzorca."""
-    embedder = _embedder() if REFUSAL_EMBEDDINGS_ENABLED else None
+    cfg = _settings(settings)
+    embedder = _embedder(cfg.model) if cfg.embeddings_enabled else None
     parts = sentences(text) or [text]
     if embedder is None or not text.strip():
         return None
@@ -132,19 +151,20 @@ def _nearest(text: str) -> Optional[tuple[float, str]]:
     return float(similarity.max()), labels[best]
 
 
-def detect_refusal(reply: str) -> Optional[dict]:
+def detect_refusal(reply: str, settings: Optional[Any] = None) -> Optional[dict]:
     """Zwraca {"method", "category", "score"} gdy odpowiedź jest odmową (w całości lub części), inaczej None.
 
     `method`: "keywords" albo "embedding"; `score`: podobieństwo do najbliższego wzorca (None bez modelu).
     """
     if not reply or not reply.strip():
         return None
+    cfg = _settings(settings)
     by_keywords = bool(KEYWORDS.search(reply))
-    nearest = _nearest(reply)
+    nearest = _nearest(reply, cfg)
     score, category = nearest if nearest else (None, "generic")
     if by_keywords:
         return {"method": "keywords", "category": category, "score": round(score, 2) if score is not None else None}
-    if score is not None and score >= REFUSAL_THRESHOLD:
+    if score is not None and score >= cfg.threshold:
         return {"method": "embedding", "category": category, "score": round(score, 2)}
     return None
 
@@ -166,26 +186,28 @@ def verify_refusal(prompt: str, reply: str) -> Optional[dict]:
             "reason": str(parsed.get("reason", "")).strip()[:200]}
 
 
-def assess_refusal(prompt: str, reply: str, denied_tools: bool = False, judge: bool = True) -> Optional[dict]:
+def assess_refusal(prompt: str, reply: str, denied_tools: bool = False, judge: bool = True,
+                   settings: Optional[Any] = None) -> Optional[dict]:
     """Ocena odmowy: słowa kluczowe i podobieństwo do wzorców tylko wskazują kandydata, rozstrzyga sędzia LLM.
 
     Kandydatem jest odpowiedź ze słowem kluczowym, podobna do wzorca odmowy (niższy próg
-    REFUSAL_TRIGGER_THRESHOLD) albo udzielona po odrzuceniu narzędzia. Zwraca
+    `trigger_threshold`) albo udzielona po odrzuceniu narzędzia. Zwraca
     {"refusal", "method", "category", "score", "reason"}; None, gdy odpowiedź nie jest kandydatem.
     Gdy sędzia jest wyłączony albo nie odpowie, zostaje sama heurystyka (jak detect_refusal).
     """
     if not reply or not reply.strip():
         return None
+    cfg = _settings(settings)
     by_keywords = bool(KEYWORDS.search(reply))
-    nearest = _nearest(reply)
+    nearest = _nearest(reply, cfg)
     score, category = nearest if nearest else (None, "generic")
     rounded = round(score, 2) if score is not None else None
-    candidate = by_keywords or denied_tools or (score is not None and score >= REFUSAL_TRIGGER_THRESHOLD)
+    candidate = by_keywords or denied_tools or (score is not None and score >= cfg.trigger_threshold)
     if not candidate:
         return None
     judged = verify_refusal(prompt, reply) if judge else None
     if judged:
         return {"refusal": judged["refusal"], "method": "llm", "score": rounded, "reason": judged["reason"],
                 "category": judged["category"] if judged["refusal"] else category}
-    heuristic = detect_refusal(reply)
+    heuristic = detect_refusal(reply, cfg)
     return {"refusal": True, "reason": "", **heuristic} if heuristic else None

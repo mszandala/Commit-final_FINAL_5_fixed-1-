@@ -99,7 +99,7 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
     #    ostrzegają, bo mylą się na zwykłych zapytaniach. W trybie "block" naruszenie zatrzymuje turę.
     if on_stage:
         on_stage()
-    guard = (check_prompt(conv.role, user_message) if policy.filter_on("prompt_guard")
+    guard = (check_prompt(conv.role, user_message, policy=policy) if policy.filter_on("prompt_guard")
              else Verdict("pass", "", "prompt_guard"))
     flagged = guard.decision == "warn"
     guard_reason = _clean(guard.reason) if flagged else None
@@ -110,7 +110,7 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
                  reason=_clean(guard.reason) if flagged or guard_blocks else None,
                  details={k: v for k, v in guard.details.items() if k != "warning"})
     if intent_on and not guard_blocks:
-        intent = classify_intent(conv.role, user_message, conv.user_texts, hint=guard_reason)
+        intent = classify_intent(conv.role, user_message, conv.user_texts, hint=guard_reason, policy=policy)
         violation = intent["category"] not in (None, IN_SCOPE)
         if violation:
             # Uzasadnienie może powtarzać dane z promptu; do logu idą etykiety typów (same reguły, bez GLiNER-a,
@@ -205,7 +205,7 @@ def check_response(ctx: TurnContext, raw_reply: str, user_message: str, request:
     # Słowa kluczowe i podobieństwo do wzorców tylko wskazują kandydata; rozstrzyga sędzia LLM.
     refusal_cfg = policy.controls.refusal_detection
     found = (assess_refusal(user_message, raw_reply or "", denied_tools=bool(denied_tools),
-                            judge=refusal_cfg.judge_enabled)
+                            judge=refusal_cfg.judge_enabled, settings=refusal_cfg)
              if refusal_cfg.enabled else None)
     if found:
         audit.record("refusal", "security", confirmed=found["refusal"], method=found["method"],

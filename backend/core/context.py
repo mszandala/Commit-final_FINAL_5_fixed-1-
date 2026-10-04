@@ -25,6 +25,10 @@ class TurnContext:
     _engine: Any = field(default=None, init=False, repr=False)
     _engine_resolved: bool = field(default=False, init=False, repr=False)
 
+    def __post_init__(self):
+        # Pseudonimy identyfikatorów (stałe HMAC zamiast kolejnych znaczników) wyznacza polityka tury.
+        self.conv.vault.id_types = tuple(self.policy.pii.id_types)
+
     @property
     def role(self) -> str:
         return self.conv.role

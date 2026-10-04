@@ -62,6 +62,7 @@ from core.pii import (
 from core.session import Conversation
 from core.stages import TOOL_PLACEHOLDER, check_request, check_response, hide_tool_names as _hide_tool_names
 from core.tool_guard import ToolGuard
+from security import refusal_detector
 from security.company_policies import CompanyPolicyEngine
 from security.company_policies.detection import build_classifier_messages, parse_classification
 from security.common.verdicts import Verdict
@@ -102,7 +103,12 @@ def current_policy() -> Policy:
             "output_filter": {"enabled": filter_on("output_filter")},
             "pii": {"mask_in_chatbot_channel": SETTINGS.mask_pii, "judge_enabled": PII_JUDGE_ENABLED,
                     "threshold": SETTINGS.pii_threshold},
-            "refusal_detection": {"enabled": REFUSAL_DETECTION_ENABLED, "judge_enabled": REFUSAL_JUDGE_ENABLED},
+            # Progi i model czytamy z modułu w chwili wywołania (tak podmieniają je testy i konfiguracja procesu).
+            "refusal_detection": {
+                "enabled": REFUSAL_DETECTION_ENABLED, "judge_enabled": REFUSAL_JUDGE_ENABLED,
+                "embeddings_enabled": refusal_detector.REFUSAL_EMBEDDINGS_ENABLED,
+                "model": refusal_detector.REFUSAL_MODEL, "threshold": refusal_detector.REFUSAL_THRESHOLD,
+                "trigger_threshold": refusal_detector.REFUSAL_TRIGGER_THRESHOLD},
         },
         # Modele z listy w interfejsie i model wdrożenia (z .env), nawet jeśli nie ma go na liście.
         "models": {"enabled": True, "allowed": [*(m["id"] for m in MODEL_PRESETS), config.MODEL]},
