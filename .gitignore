@@ -14,3 +14,7 @@ backend/audit/*.db
 # Nadpisania polityki z interfejsu (stan lokalny)
 policy/*.overrides.json
 policy/*.overrides.json.tmp
+
+# Baza wydatków roli: stan lokalny, zmienia się przy każdym uruchomieniu (nie wersjonujemy)
+backend/spending.db
+backend/spending.db-journal
