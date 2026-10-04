@@ -85,6 +85,8 @@ OPERATIONS = ("count", "sum", "avg", "min", "max")
 MAX_GROUPS = 50
 # Statystyka z mniejszej grupy jest ukrywana: średnia z jednego wiersza to czyjaś konkretna wartość.
 MIN_GROUP_ROWS = 5
+# Model wypełnia opcjonalny filtr takimi wartościami, gdy chce wszystkich wierszy.
+NO_FILTER = {"", "all", "any", "*", "none", "null"}
 
 
 def aggregate_csv(
@@ -110,6 +112,8 @@ def aggregate_csv(
         return f"Operation '{operation}' needs a numeric column."
     if group_by in sensitive_columns:
         return f"Cannot group by '{group_by}': it identifies individual records."
+    if str(filter_value).strip().lower() in NO_FILTER:
+        filter_column = ""
 
     with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter=delimiter)
@@ -137,7 +141,8 @@ def aggregate_csv(
                     continue
 
     if not rows:
-        return "(no matching rows)"
+        return (f"(no rows where {filter_column} equals '{filter_value}'; leave filter_column empty to use all rows)"
+                if filter_column else "(no matching rows)")
     if operation != "count" and not any(values.values()):
         return f"Column '{column}' has no numeric values."
 

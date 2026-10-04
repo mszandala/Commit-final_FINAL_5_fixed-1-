@@ -620,7 +620,9 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         intent = classify_intent(conv.role, user_message, conv.user_texts, hint=guard_reason)
         violation = intent["category"] not in (None, IN_SCOPE)
         if violation:
-            detail = _logged_prompt(intent["reason"], threshold) if intent["reason"] else ""
+            # Uzasadnienie może powtarzać dane z promptu; do logu idą etykiety typów (same reguły, bez GLiNER-a,
+            # który w krótkim zdaniu oznacza słowo „Użytkownik" jako osobę).
+            detail = _label_sensitive(intent["reason"], detect_regex_pii(intent["reason"]))
             guard_reason = INTENT_CATEGORIES[intent["category"]] + (f": {detail}" if detail else "")
             flagged, guard_blocks = True, block_mode
         audit.record("intent", "security", category=intent["category"], blocked=violation and block_mode,

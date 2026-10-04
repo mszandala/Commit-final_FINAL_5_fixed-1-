@@ -30,8 +30,8 @@ def summarize_client_records(operation: str = "count", column: str = "", group_b
         operation: One of count, sum, avg, min, max.
         column: Numeric column for sum/avg/min/max, e.g. balance, credit_score. Not needed for count.
         group_by: Optional column to split the result by, e.g. country, churn.
-        filter_column: Optional column to filter on before computing.
-        filter_value: Value filter_column must equal.
+        filter_column: Leave empty to use all records. Set it only to restrict the records to one value.
+        filter_value: Exact value filter_column must equal (only with filter_column).
 
     Returns:
         CSV text: group, number of rows, result. Statistics of groups under 5 rows are hidden.

@@ -66,8 +66,8 @@ def _intent(e: dict) -> tuple[str, str]:
     category = e.get("category")
     if category == "in_scope":
         return "info", "The request is within the role's scope"
-    summary = f"{INTENT_CATEGORIES.get(category, category)}: {e.get('reason')}"
-    return ("block" if e.get("blocked") else "warn"), summary[0].upper() + summary[1:]
+    # Powód (po polsku, jak inne decyzje strażników) zaczyna się już od nazwy kategorii.
+    return ("block" if e.get("blocked") else "warn"), e.get("reason") or INTENT_CATEGORIES.get(category, category)
 
 
 def _company_policy(e: dict) -> tuple[str, str]:

@@ -102,6 +102,11 @@ def test_summaries_cover_the_whole_file_and_hide_small_groups(data_dir):
     one_person = run_tool("summarize_employee_records", {"operation": "max", "column": "MonthlyIncome",
                                                          "filter_column": "Age", "filter_value": "50"})
     assert "9000" not in one_person
+    # model wypełnia opcjonalny filtr wartością "All" — to znaczy: bez filtra
+    assert run_tool("summarize_employee_records", {"filter_column": "Department", "filter_value": "All"}) \
+        == "group,rows,count\nall,61,61\n"
+    assert "leave filter_column empty" in run_tool("summarize_employee_records",
+                                                   {"filter_column": "Department", "filter_value": "Legal"})
     assert run_tool("summarize_employee_records", {"operation": "median"}).startswith("Unknown operation")
     assert run_tool("summarize_employee_records", {"operation": "sum"}).startswith("Operation 'sum' needs")
     assert run_tool("summarize_employee_records", {"group_by": "MonthlyIncome"}).startswith("Cannot group by")
