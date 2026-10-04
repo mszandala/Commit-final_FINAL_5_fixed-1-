@@ -1,11 +1,9 @@
-"""Start serwera API: python main.py (z katalogu backend/). Dokumentacja: http://127.0.0.1:8000/docs"""
+"""API server entrypoint: python main.py (from backend/ directory). Docs: http://127.0.0.1:8000/docs"""
 import os
 
 import uvicorn
 
-# Na komputerach, gdzie antywirus lub firmowe proxy podmienia certyfikaty HTTPS, Python odrzuca
-# połączenie z dostawcą modelu. Jeśli pakiet truststore jest zainstalowany, używamy magazynu
-# certyfikatów systemu; weryfikacja certyfikatów pozostaje włączona.
+# Inject system certificate store via truststore if available to handle custom corporate root CAs.
 try:
     import truststore
     truststore.inject_into_ssl()

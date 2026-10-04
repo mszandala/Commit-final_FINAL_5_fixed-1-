@@ -10,8 +10,8 @@ const PROVIDERS = [
 ]
 
 const GUARD_MODES = [
+  { id: 'block', label: 'Block (Default)', hint: 'Stops the request before it reaches the model' },
   { id: 'warn', label: 'Warn only', hint: 'Flags the request in the logs and lets it through' },
-  { id: 'block', label: 'Block', hint: 'Stops the request before it reaches the model' },
 ]
 
 // Hints for the levels in GET /meta -> sensitivityLevels.

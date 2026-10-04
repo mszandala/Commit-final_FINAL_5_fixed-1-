@@ -1,99 +1,99 @@
 # =====================================================================================
-#  Polityka warstwy bezpieczeństwa (AI Control Layer) — jedno źródło konfiguracji
+#  AI Control Layer Security Policy — Single Source of Configuration
 # =====================================================================================
 #
-#  * Plik jest przeładowywany na żywo: zapisz zmianę, a obowiązuje od następnego żądania
-#    (bez restartu). Błędny plik nie zatrzymuje serwera — obowiązuje ostatnia poprawna
-#    wersja, a błąd widać w statusie polityki (GET /api/v1/policy).
-#  * Nieznane klucze są odrzucane (literówka nie może po cichu wyłączyć zabezpieczenia).
-#  * Usunięcie sekcji kontroli NIE wyłącza jej — wraca do wartości domyślnych (włączona).
-#    Kontrolę wyłącza się jawnie: `enabled: false`.
-#  * Zmiany z interfejsu (przełączniki) nie przepisują tego pliku: trafiają do
-#    policy.overrides.json obok niego i są nakładane na plik. "Reset" w interfejsie
-#    usuwa nadpisania i wraca do wartości z tego pliku.
+#  * The file is hot-reloaded: saving changes takes effect on the next request
+#    (without restart). An invalid file does not stop the server — the last valid
+#    version remains active, and any parse errors are reported in GET /api/v1/policy.
+#  * Unknown keys are rejected to prevent typos from silently disabling guardrails.
+#  * Removing a control section does NOT disable it — it defaults to enabled.
+#    To disable a control, set `enabled: false` explicitly.
+#  * Changes made via the UI (toggles) do not overwrite this file: they are saved to
+#    policy.overrides.json alongside it. "Reset" in the UI removes overrides and
+#    reverts to the base policy file.
 #
-#  Kolejność składania: ten plik -> aktywny profil (`profile`) -> nadpisania z interfejsu.
+#  Precedence order: base file -> active profile (`profile`) -> UI overrides.
 # =====================================================================================
 
 version: 1
 
-# Aktywny profil ścisłości: strict | balanced | permissive (definicje niżej, w `profiles`).
-# `balanced` to wartości bazowe zapisane w tym pliku.
+# Active strictness profile: strict | balanced | permissive (definitions below under `profiles`).
+# `balanced` uses the default base values in this file.
 profile: balanced
 
 # -------------------------------------------------------------------------------------
-#  Profile ścisłości — nadpisują tylko to, co wymienią (sekcje `controls` i `budgets`).
+#  Strictness profiles — only override listed sections (`controls` and `budgets`).
 # -------------------------------------------------------------------------------------
 profiles:
-  # Środowisko wysokiego ryzyka: krótkie prompty, każda wątpliwość blokuje, niski budżet.
+  # High-risk environment: short prompts, any doubt blocks, low budget.
   strict:
     controls:
       prompt_length: {max_chars: 2000}
       prompt_guard: {mode: block}
       company_policies:
-        strict_keywords: true      # samo słowo kluczowe w odpowiedzi/wyniku narzędzia blokuje
-        semantic_blocks: true      # sama ocena tematu przez klasyfikator blokuje
-        fail_closed: true          # niedostępny klasyfikator = blokada
-      pii: {threshold: 0.20}       # niższy próg = detektor PII wykrywa więcej
+        strict_keywords: true      # keywords in response/tool result block immediately
+        semantic_blocks: true      # topic classification alone blocks
+        fail_closed: true          # classifier unavailable = block
+      pii: {threshold: 0.20}       # lower threshold = catches more PII
     budgets:
       per_turn: {max_cost_usd: 0.02, max_tool_steps: 6}
       spending_limit_usd: 0.25
 
-  # Domyślne wartości bazowe (poniżej). Pusty profil = bez zmian.
+  # Default balanced baseline (empty profile = no overrides).
   balanced: {}
 
-  # Środowisko deweloperskie: ostrzega zamiast blokować, wyższe limity.
+  # Development environment: warns instead of blocking, higher resource limits.
   permissive:
     controls:
       prompt_length: {max_chars: 8000}
-      prompt_guard: {mode: warn}   # ostrzega i przepuszcza
-      pii: {threshold: 0.50}       # wyższy próg = mniej fałszywych wykryć
+      prompt_guard: {mode: warn}   # warns and allows through
+      pii: {threshold: 0.50}       # higher threshold = fewer false positives
     budgets:
       per_turn: {max_cost_usd: 0.20, max_tool_steps: 15}
       spending_limit_usd: 2.0
 
 # -------------------------------------------------------------------------------------
-#  Kontrole (guardrails), w kolejności etapów tury.
-#  Deterministyczne: prompt_length, prompt_guard (wzorce), tool_whitelist, code_guard,
-#                    output_filter (reguły PII), company_policies (znaczniki, wzorce, odciski).
-#  Semantyczne (AI): intent_classifier, company_policies.classifier, pii.judge_enabled,
-#                    refusal_detection (embeddingi + sędzia).
+#  Controls (guardrails), in order of turn execution pipeline.
+#  Deterministic: prompt_length, prompt_guard (patterns), tool_whitelist, code_guard,
+#                 output_filter (PII rules), company_policies (markers, patterns, fingerprints).
+#  Semantic (AI): intent_classifier, company_policies.classifier, pii.judge_enabled,
+#                 refusal_detection (embeddings + judge).
 # -------------------------------------------------------------------------------------
 controls:
   prompt_length:
     enabled: true
-    max_chars: 4000            # dłuższy prompt jest odrzucany, zanim zobaczy go jakikolwiek model
+    max_chars: 4000            # prompts exceeding this limit are rejected before reaching any model
 
   prompt_guard:
     enabled: true
-    mode: block                # block = zatrzymuje zapytanie; warn = ostrzega i przepuszcza
-                               # (tryb dotyczy też klasyfikatora intencji)
+    mode: block                # block = rejects request; warn = warns and permits
+                               # (applies to intent classifier as well)
 
-  intent_classifier:           # LLM: czy zapytanie mieści się w pracy roli
+  intent_classifier:           # LLM: classifies whether prompt fits role scope
     enabled: true
 
-  company_policies:            # regulaminy firmowe: prompt, argumenty narzędzi, wyniki, odpowiedź
+  company_policies:            # company policies: prompt, tool args, results, reply
     enabled: true
-    classifier: security       # security = model strefy bezpieczeństwa; policy = z nagłówka rules.txt
-    strict_keywords: false     # false: słowo kluczowe w wyniku/odpowiedzi tylko ostrzega
-    semantic_blocks: false     # false: ocena tematu bez twardego dowodu tylko ostrzega
-    fail_closed: false         # false: niedostępny klasyfikator = ostrzeżenie + same reguły
+    classifier: security       # security = security zone model; policy = from rules.txt header
+    strict_keywords: false     # false: keyword in result/reply warns only
+    semantic_blocks: false     # false: semantic topic match without hard proof warns only
+    fail_closed: false         # false: unavailable classifier = warning + rule execution only
 
-  tool_whitelist:              # dozwolone narzędzia per rola (sekcja `roles`)
-    enabled: true
-
-  code_guard:                  # statyczna kontrola kodu Pythona przed uruchomieniem
+  tool_whitelist:              # allowed tools per role (defined in `roles` section)
     enabled: true
 
-  output_filter:               # ukrywanie/blokowanie PII w odpowiedzi wg roli
+  code_guard:                  # static Python code inspection prior to execution
+    enabled: true
+
+  output_filter:               # PII redaction/blocking in assistant response by role
     enabled: true
 
   pii:
-    mask_in_chatbot_channel: true   # model w chmurze widzi znaczniki <EMAIL_1> zamiast wartości
-    judge_enabled: true             # sędzia LLM dla typów oznaczonych `judge` (imiona, kwoty)
-    threshold: 0.35                 # próg detektora PII (0–1); niższy = więcej wykryć
+    mask_in_chatbot_channel: true   # cloud model receives tokens like <EMAIL_1> instead of raw values
+    judge_enabled: true             # LLM judge for entities marked `judge` (names, amounts)
+    threshold: 0.35                 # PII detector threshold (0-1); lower = more detections
 
-  refusal_detection:           # wykrywanie, że chatbot odmówił użytkownikowi
+  refusal_detection:           # detects when chatbot refused the user
     enabled: true
     embeddings_enabled: true
     judge_enabled: true
@@ -102,10 +102,10 @@ controls:
     trigger_threshold: 0.35
 
 # -------------------------------------------------------------------------------------
-#  Dozwolone modele LLM
-#  Zapytanie do modelu spoza listy jest blokowane przed jakimkolwiek wywołaniem (etap: Model policy).
-#  Wpisy to nazwy albo wzorce z `*`, np. "google/gemma-*". Pusta lista albo `enabled: false`
-#  oznacza brak ograniczeń.
+#  Allowed LLM Models
+#  Requests to models not on this list are blocked (stage: Model policy).
+#  Entries are exact names or wildcard patterns, e.g. "google/gemma-*".
+#  Empty list or `enabled: false` means no restrictions.
 # -------------------------------------------------------------------------------------
 models:
   enabled: true
@@ -115,21 +115,20 @@ models:
     - gemma4:12b
 
 # -------------------------------------------------------------------------------------
-#  Proxy zgodne z OpenAI: POST /v1/chat/completions
-#  Aplikacja zmienia tylko base_url (np. http://127.0.0.1:8000/v1) i klucz API; rolę wyznacza klucz.
+#  OpenAI-compatible proxy: POST /v1/chat/completions
+#  Clients configure base_url (e.g. http://127.0.0.1:8000/v1) and API key; role is derived from key.
 # -------------------------------------------------------------------------------------
 proxy:
-  default_model: ""          # pusty = model wdrożenia; klient może podać inny z listy `models`
-  max_reasks: 2              # ile razy proxy ponawia pytanie do modelu po odrzuconym narzędziu
-  session_ttl_seconds: 3600  # po tylu sekundach bez ruchu sejf rozmowy (wartości ukryte przed modelem) jest usuwany
+  default_model: ""          # empty = deployment model; client may specify any allowed model
+  max_reasks: 2              # times proxy re-prompts model after a rejected tool call
+  session_ttl_seconds: 3600  # seconds of inactivity before session state (masked values vault) is evicted
   max_sessions: 1000
   max_body_bytes: 1048576
   max_messages: 200
 
-# Klienci proxy: nazwa, rola i SKRÓT SHA-256 klucza API (jawnego klucza nie ma w pliku).
-# Skrót klucza: python -m proxy hash-key <klucz>
-# UWAGA: poniższe klucze są jawne w dokumentacji i służą tylko do demonstracji; wygeneruj własne.
-#   demo-basic: sk-demo-basic-user   demo-hr: sk-demo-hr   demo-banker: sk-demo-banker   demo-admin: sk-demo-admin
+# Proxy clients: name, role, and SHA-256 hash of API key (plain keys are not stored).
+# Key hash command: python -m proxy hash-key <key>
+# NOTE: these demo keys are for local demonstration only.
 clients:
   - {name: demo-basic, role: "podstawowy użytkownik", key_sha256: 3761ff74ef290916d9cc795731cd8b50d04fcaf6df2c97d20aa76fda9181b17b}
   - {name: demo-hr, role: kadry, key_sha256: df4fe706ff5796d86968d559bba341f2f362e54dcbb68cb967aa3058ed7e2561}
@@ -137,28 +136,29 @@ clients:
   - {name: demo-admin, role: administrator, key_sha256: a1304128f87ba7aa357d7fe938db628cccb9ad9465ba832773a604aed2cfd54e}
 
 # -------------------------------------------------------------------------------------
-#  Budżety i zasoby
-#  (dzienny budżet tokenów danej roli: `daily_tokens` w sekcji `roles`)
+#  Budgets and resources
+#  (daily token budget per role: `daily_tokens` in `roles` section)
 # -------------------------------------------------------------------------------------
 budgets:
-  per_turn:                    # limity jednej tury; po przekroczeniu kolejne narzędzia są odrzucane
+  per_turn:                    # limits per turn; further tools are blocked when exceeded
     max_tokens: 40000
     max_cost_usd: 0.05
     max_tool_steps: 10
-    max_tool_result_chars: 24000   # dłuższy wynik narzędzia jest przycinany
-  spending_limit_usd: 0.5      # łączny limit wydatków roli (bez dziennego zerowania)
+    max_tool_result_chars: 24000   # results exceeding this are truncated
+  spending_limit_usd: 0.5      # cumulative spending limit per role (does not reset daily)
 
 # -------------------------------------------------------------------------------------
-#  Dane wrażliwe (PII)
-#  Działania: allow (pokaż) | redact (zamaskuj) | block (zablokuj całość)
-#             judge (tylko kanał chatbota: decyduje sędzia LLM) | pseudonymize (tylko identyfikatory)
+#  Sensitive data (PII)
+#  Actions: allow | redact | block
+#           judge (chatbot channel only: decided by LLM judge) | pseudonymize (identifiers)
 # -------------------------------------------------------------------------------------
 pii:
-  # Reguły globalne: obowiązują każdą rolę, nadpisanie roli może je tylko zaostrzyć.
-  global_blocked: [PASSWORD, CREDIT-CARD-NO]   # odpowiedź się nie wyświetla
-  global_redacted: [EMAIL, PHONE-NO]           # fragment zastępowany znacznikiem [TYP]
+  # Global rules: apply to all roles; role policies can only make them stricter.
+  global_blocked: [PASSWORD, CREDIT-CARD-NO]
+  global_redacted: [EMAIL, PHONE-NO]
 
-  # Co z promptu i wyników narzędzi może zobaczyć model w chmurze (jedna polityka dla wszystkich ról).
+
+  # What the cloud model can see from user prompts and tool results (uniform for all roles).
   chatbot_policy:
     PASSWORD: redact
     EMAIL: redact
@@ -174,7 +174,7 @@ pii:
     LOCATION: allow
     PROJECT: allow
 
-  # Punkt wyjścia polityki kanału użytkownika; typ spoza tej mapy jest ukrywany.
+  # Baseline user channel policy; entity types omitted here are redacted by default.
   default_role_policy:
     NAME: redact
     SALARY: redact
@@ -186,15 +186,15 @@ pii:
     ACCOUNT-NO: allow
     EMPLOYEE-ID: allow
 
-  # Typy zamieniane na stałe pseudonimy (HMAC) zamiast kolejnych znaczników.
+  # Types converted to consistent HMAC pseudonyms instead of sequential numbered placeholders.
   id_types: [CLIENT-ID, ACCOUNT-NO, EMPLOYEE-ID]
 
 # -------------------------------------------------------------------------------------
-#  Narzędzia: jak traktować wynik narzędzia, zanim trafi do modelu.
-#  scan: columns (polityka kolumn CSV) | regex (same reguły) | full (reguły + GLiNER) | none
-#  public: źródło publiczne — wartości z wyniku nie są PII w odpowiedzi
-#  chatbot_zone: argumenty wracają do modelu w chmurze — nie odmaskowujemy ich
-#  Narzędzie spoza listy dostaje `tool_defaults.scan`.
+#  Tools: how to process tool output before passing back to the model.
+#  scan: columns (CSV column policy) | regex (rules only) | full (rules + GLiNER) | none
+#  public: public source — values in result are not considered PII in replies
+#  chatbot_zone: arguments returned to model in cloud — do not unmask
+#  Tools not listed default to `tool_defaults.scan`.
 # -------------------------------------------------------------------------------------
 tool_defaults:
   scan: full
@@ -221,7 +221,7 @@ tools:
   read_earnings_call: {scan: regex, public: true}
   create_subagent: {scan: none, chatbot_zone: true}
 
-# Obszary danych (nazwy pokazywane modelowi i w macierzy ról zamiast nazw narzędzi).
+# Data areas (presented to model and role matrix in place of internal tool names).
 areas:
   projects: {label: Projects, tools: [list_projects, read_project]}
   hr: {label: HR data, tools: [read_employee_records, summarize_employee_records]}
@@ -232,7 +232,7 @@ areas:
   code: {label: Run code, tools: [run_python]}
   subagents: {label: Subagents, tools: [create_subagent]}
 
-# Zasób danych -> narzędzia, które go czytają (strażnik promptu sprawdza z tego dostęp roli).
+# Data resource -> tools reading it (prompt guard evaluates role access based on this).
 resources:
   employee_data: [read_employee_records, summarize_employee_records]
   client_data: [read_client_records, summarize_client_records]
@@ -241,27 +241,27 @@ resources:
   earnings_calls: [list_earnings_calls, read_earnings_call]
 
 # -------------------------------------------------------------------------------------
-#  Role: dozwolone narzędzia, widoczne typy PII i dzienny budżet tokenów.
-#  Kolejność ról = kolejność w interfejsie (od najmniejszych uprawnień).
+#  Roles: allowed tools, visible PII types, and daily token budgets.
+#  Role order = display order in the UI (from lowest privilege).
 # -------------------------------------------------------------------------------------
 roles:
   "podstawowy użytkownik":
     id: basic_user
-    description: "Pracownik bez specjalnych uprawnień; korzysta z ogólnej bazy wiedzy o projektach."
+    description: "Standard employee without elevated permissions; accesses general project knowledge."
     allowed_tools: [list_projects, read_project]
     allowed_pii: [PROJECT, ORGANIZATION]
     daily_tokens: 20000
 
   "kadry":
     id: hr
-    description: "Dział kadr; pracuje na danych pracowników: stanowiska, wynagrodzenia, oceny, rotacja."
+    description: "HR department (Dział kadr); works with employee records: positions, compensation, performance, attrition."
     allowed_tools: [list_projects, read_project, read_employee_records, summarize_employee_records]
     allowed_pii: [SALARY, PROJECT, ORGANIZATION]
     daily_tokens: 50000
 
   "bankier":
     id: banker
-    description: "Doradca bankowy; obsługuje klientów banku (saldo, scoring, ryzyko odejścia) i kampanie sprzedaży lokat."
+    description: "Bank relationship advisor; manages bank client accounts and deposit marketing campaigns."
     allowed_tools:
       - list_projects
       - read_project
@@ -273,7 +273,7 @@ roles:
 
   "analityk":
     id: analyst
-    description: "Analityk danych; pracuje na danych kampanii, spseudonimizowanych rekordach klientów oraz danych rynkowych."
+    description: "Data analyst; works on marketing campaigns, pseudonymized client records, and market data."
     allowed_tools:
       - list_projects
       - read_project
@@ -285,20 +285,20 @@ roles:
       - read_earnings_call
       - create_subagent
     allowed_pii: [SALARY, ORGANIZATION, LOCATION, PROJECT]
-    # Widzi rekordy klientów, ale identyfikatory tylko jako stałe pseudonimy.
+    # Sees client records, but identifiers are kept as stable pseudonyms.
     pii_policy: {CLIENT-ID: pseudonymize, ACCOUNT-NO: pseudonymize, EMPLOYEE-ID: pseudonymize}
     daily_tokens: 100000
 
   "prawnik":
     id: lawyer
-    description: "Dział prawny; analizuje publiczne wypowiedzi spółek z telekonferencji wynikowych."
+    description: "Legal counsel; analyzes public disclosures and quarterly earnings calls."
     allowed_tools: [list_projects, read_project, list_earnings_calls, read_earnings_call]
     allowed_pii: [ORGANIZATION, NAME, LOCATION, PROJECT]
     daily_tokens: 50000
 
   "Portfolio Manager":
     id: portfolio_manager
-    description: "Zarządzający portfelem; analizuje notowania i telekonferencje wynikowe spółek."
+    description: "Portfolio manager; analyzes stock performance and public corporate earnings calls."
     allowed_tools:
       - list_projects
       - read_project
@@ -310,14 +310,14 @@ roles:
 
   "IT":
     id: it
-    description: "Dział IT; korzysta z dokumentacji technicznej projektów."
+    description: "IT engineering; utilizes technical project documentation and code tools."
     allowed_tools: [list_projects, read_project, create_subagent]
     allowed_pii: [PROJECT, ORGANIZATION]
     daily_tokens: 50000
 
   "administrator":
     id: admin
-    description: "Administrator systemu z pełnym dostępem do wszystkich danych."
+    description: "System administrator with full access to all tools and company data."
     allowed_tools:
       - list_projects
       - read_project
@@ -335,3 +335,4 @@ roles:
       - create_subagent
     allowed_pii: [NAME, SALARY, ORGANIZATION, LOCATION, PROJECT]
     daily_tokens: 200000
+

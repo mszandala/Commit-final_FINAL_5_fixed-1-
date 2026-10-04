@@ -11,18 +11,18 @@ from config import MAX_SPENDING
 if TYPE_CHECKING:
     from core.models import Policy
 
-CHARS_PER_TOKEN = 4     # zgrubny przelicznik do oceny wiadomości przed wysłaniem
+CHARS_PER_TOKEN = 4     # rough multiplier to estimate message token count before sending
 
 
 class Budget:
-    """Dwa limity na rolę: dzienny budżet tokenów i łączny limit wydatków w dolarach.
+    """Two limits per role: daily token budget and total spending limit in USD.
 
-    Zużycie jest zapisywane w SQLite, więc przetrwa restart serwera. Wydatki trafiają do tabeli
-    `spending` w tym samym układzie, którego używa chat_testing.py (user_type = id roli).
+    Usage is persisted in SQLite, surviving server restarts. Spending records are stored in the
+    `spending` table with the same schema used by chat_testing.py (user_type = role id).
 
-    Limity i identyfikatory ról pochodzą z polityki, gdy podano jej źródło (`policy`: wywołanie zwracające
-    aktualną politykę, więc zmiana pliku działa od następnego sprawdzenia). Bez niego (tryb zgodności dla
-    dema) z config.py: ROLES i MAX_SPENDING.
+    Limits and role IDs are sourced from the policy when provided (`policy`: callable returning
+    current policy, so changes apply on the next check). Otherwise (compatibility mode for demo)
+    sourced from config.py: ROLES and MAX_SPENDING.
     """
 
     def __init__(self, db_path: Optional[Path] = None, policy: Optional[Callable[[], "Policy"]] = None):
@@ -55,7 +55,7 @@ class Budget:
             return conn.execute(sql, params).fetchone()[0]
 
     def _role(self, role: str) -> tuple[str, int]:
-        """(identyfikator roli w bazie, dzienny budżet tokenów); KeyError dla nieznanej roli."""
+        """(role ID in DB, daily token budget); KeyError for unknown role."""
         if self._policy is not None:
             cfg = self._policy().role(role)
             if cfg is None:
@@ -70,7 +70,7 @@ class Budget:
         return [cfg["id"] for cfg in config.ROLES.values()]
 
     def spending_limit(self) -> float:
-        """Łączny limit wydatków roli w dolarach."""
+        """Total role spending limit in USD."""
         return self._policy().budgets.spending_limit_usd if self._policy is not None else MAX_SPENDING
 
     def token_limit(self, role: str) -> int:
@@ -100,7 +100,7 @@ class Budget:
                     (role_id, cost, model, datetime.now(timezone.utc).isoformat()))
 
     def check(self, role: str, message: str) -> Optional[dict]:
-        """Werdykt blokady, jeśli któryś limit jest wyczerpany; inaczej None."""
+        """Block verdict if any limit is exhausted; otherwise None."""
         limit = self.spending_limit()
         if self.spent(role) > limit:
             return {"decision": "block", "stage": "budget",
@@ -111,7 +111,7 @@ class Budget:
         return None
 
     def reset(self, role: Optional[str] = None) -> None:
-        """Zeruje zużycie tokenów i wydatki jednej roli albo — bez argumentu — wszystkich ról."""
+        """Resets token usage and spending for a single role, or for all roles if None."""
         role_ids = [self._role(role)[0]] if role else self._role_ids()
         marks = ", ".join("?" * len(role_ids))
         with self._lock, closing(self._connect()) as conn, conn:
