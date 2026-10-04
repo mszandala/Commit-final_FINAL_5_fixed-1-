@@ -36,6 +36,10 @@ def read_csv_rows(
         return f"File not found: {path.name}"
     limit = max(1, min(int(limit), MAX_ROWS))
     start_row = max(0, int(start_row))
+    # Model podaje kolumnę z pustą wartością (albo z jej własną nazwą), gdy chce wszystkich wierszy;
+    # taki filtr nic by nie zwrócił, a model zmyśla wtedy wynik.
+    if str(value).strip() in ("", column):
+        column = ""
 
     with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter=delimiter)

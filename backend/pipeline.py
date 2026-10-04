@@ -460,6 +460,15 @@ def _plausible(entity: dict) -> bool:
     return True
 
 
+def _pseudonymize_known_ids(text: str, vault: Vault, policy: dict, own: str) -> str:
+    """Identyfikator z sejfu wypisany wprost (np. model zna publiczny zbiór danych z treningu) wraca do
+    pseudonimu, gdy rola ma widzieć identyfikatory tylko jako pseudonimy."""
+    for token, entity_type, value in vault.entries():
+        if policy.get(entity_type) == "pseudonymize" and value and value not in own:
+            text = re.sub(rf"(?<!\d){re.escape(value)}(?!\d)", token, text)
+    return text
+
+
 def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts=(), public_texts=(),
                   threshold: Optional[float] = None, redact: bool = True, judge: bool = False,
                   enforce: bool = True) -> tuple[str, str, dict]:
@@ -478,6 +487,7 @@ def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts
     policy = role_policy(role) if enforce else _AllowAll()
     own = "\n".join(own_texts)
     exempt = own + "\n" + "\n".join(public_texts)
+    text = _pseudonymize_known_ids(text, vault, policy, own)
     spans = vault.token_spans(text)
 
     entities = [

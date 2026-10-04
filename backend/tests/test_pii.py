@@ -127,3 +127,17 @@ def test_decimal_fractions_are_not_numbers_to_hide():
     for text in ["The value is approximately 22.459157718361045", "e^pi = 23,140692632779267", "1.4111111111111111"]:
         assert detect_regex_pii(text) == [], text
     assert [e["type"] for e in detect_regex_pii("tel 601-234-567")] == ["PHONE-NO"]
+
+
+def test_regex_detection_wins_over_overlapping_model_entity(monkeypatch):
+    """GLiNER bierze "customer_id 15634602" za imię i nazwisko; reguła CLIENT-ID ma pierwszeństwo."""
+    from security.pii import pii_detector
+    text = "Pokaż klienta customer_id 15634602, prowadzi go Jan Kowalski."
+    start = text.index("customer_id")
+    name = text.index("Jan Kowalski")
+    monkeypatch.setattr(pii_detector, "detect_gliner_pii", lambda text, threshold=None: [
+        {"type": "NAME", "text": "customer_id 15634602", "start": start, "end": start + 20},
+        {"type": "NAME", "text": "Jan Kowalski", "start": name, "end": name + 12},
+    ])
+    found = [(e["type"], e["text"]) for e in pii_detector.detect_pii(text)]
+    assert found == [("CLIENT-ID", "15634602"), ("NAME", "Jan Kowalski")]

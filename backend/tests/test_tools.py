@@ -111,3 +111,11 @@ def test_summaries_cover_the_whole_file_and_hide_small_groups(data_dir):
     assert run_tool("summarize_employee_records", {"operation": "sum"}).startswith("Operation 'sum' needs")
     assert run_tool("summarize_employee_records", {"group_by": "MonthlyIncome"}).startswith("Cannot group by")
     assert is_allowed("kadry", "summarize_employee_records") and not is_allowed("kadry", "summarize_client_records")
+
+
+def test_column_with_empty_value_means_no_filter(data_dir):
+    """Model podaje kolumnę z pustą wartością, gdy chce wszystkich wierszy."""
+    out = run_tool("read_employee_records", {"column": "Department", "value": "", "limit": 5})
+    assert out.strip().splitlines()[1:] == ["41,Sales,5993", "49,R&D,5130", "33,Sales,2909"]
+    assert run_tool("read_employee_records", {"column": "Department", "value": "Department"}) == out
+    assert run_tool("read_employee_records", {"column": "Department", "value": "Sales"}).count("Sales") == 2

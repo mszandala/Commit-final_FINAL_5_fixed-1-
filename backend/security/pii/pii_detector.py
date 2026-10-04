@@ -38,5 +38,9 @@ def detect_pii(text: str, threshold: Optional[float] = None) -> list[dict]:
     # 2. Semantyczna detekcja zero-shot modelem GLiNER: organizacje, projekty, kwoty, lokalizacje, osoby
     gliner_entities = detect_gliner_pii(text, threshold=threshold)
 
-    # 3. Połączenie wyników i usunięcie kolizji (z priorytetem dla reguł deterministycznych)
+    # 3. Połączenie wyników i usunięcie kolizji (z priorytetem dla reguł deterministycznych): encja modelu
+    #    nachodząca na wykrycie regułowe odpada. Inaczej GLiNER bierze "customer_id 15634602" za imię
+    #    i nazwisko, a narzędzie dostaje po odmaskowaniu cały ten napis zamiast numeru klienta.
+    gliner_entities = [g for g in gliner_entities
+                       if not any(g["start"] < r["end"] and r["start"] < g["end"] for r in regex_entities)]
     return _merge_entities(regex_entities + gliner_entities)

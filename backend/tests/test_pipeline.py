@@ -607,3 +607,13 @@ def test_remaining_role_budget_narrows_the_turn_limit(llm, env, monkeypatch):
     result = pipeline.run_turn(pipeline.Conversation("podstawowy użytkownik"), "Wypisz projekty",
                                limits={"tokens": 50_000, "cost": 0.01})
     assert result.tool_calls[0]["stage"] == "budget" and "$0.0100" in result.tool_calls[0]["reason"]
+
+
+def test_raw_id_known_to_the_vault_is_pseudonymized_for_the_analyst():
+    """Model wypisuje surowe ID (np. zna publiczny zbiór z treningu); analityk i tak widzi tylko pseudonim."""
+    vault = pipeline.Vault()
+    token = vault.token_for("CLIENT-ID", CLIENT)
+    text = f"| {CLIENT} | 619 |"
+    assert pipeline.filter_output("analityk", text, vault)[0] == f"| {token} | 619 |"
+    assert pipeline.filter_output("bankier", text, vault)[0] == text                  # bankier widzi ID
+    assert pipeline.filter_output("analityk", text, vault, own_texts=[CLIENT])[0] == text   # sam je podał

@@ -19,6 +19,7 @@ import pipeline
 from api import schemas, state
 from api.steps import LEVELS, STEP_KINDS, ZONES
 from audit import store
+from live_tests import runner as live_runner
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -340,6 +341,43 @@ def stats():
         tokens=sum(e["tokens"] for e in rows),
         avg_latency_ms=int(sum(e["latency_ms"] for e in rows) / len(rows)) if rows else 0,
     )
+
+
+# --- testy na żywym modelu (live_tests/scenarios.json) ---------------------------------------
+
+def _log_test_turn(name: str, conv: pipeline.Conversation, result: pipeline.TurnResult) -> int:
+    """Tura testu trafia do logu jak zwykła rozmowa; budżetu roli nie obciąża, żeby testy nie blokowały czatu."""
+    return state.add_event(name, conv.id, result.verdict, result)["id"]
+
+
+@router.get("/tests", tags=["tests"],
+            summary="Scenariusze testów na żywym modelu z grupami; plik czytany przy każdym żądaniu")
+def live_tests_catalog():
+    try:
+        catalog = live_runner.load_catalog()
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, f"Błędny plik scenariuszy: {exc}")
+    for s in catalog["scenarios"]:
+        s["roleLabel"] = ROLES[state.ROLE_BY_ID[s["role"]]]["label"]
+    return {**catalog, "model": SETTINGS.model}
+
+
+@router.post("/tests/runs", tags=["tests"],
+             summary="Uruchamia scenariusze (body: {ids}; brak = wszystkie) po kolei w tle; stan w GET /tests/runs/current")
+def start_live_tests(body: Optional[dict] = None):
+    if problem := _config_problem():
+        raise HTTPException(503, problem)
+    try:
+        return live_runner.start_run((body or {}).get("ids"), on_turn=_log_test_turn)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/tests/runs/current", tags=["tests"], summary="Ostatni przebieg testów: postęp i wyniki; null, gdy nie było")
+def current_live_tests():
+    return live_runner.current_run()
 
 
 def _warm_up() -> None:
