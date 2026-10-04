@@ -34,7 +34,7 @@ BENIGN = [
 def test_ignore_instructions_attack_is_flagged(text):
     verdict = check_prompt("podstawowy użytkownik", text)
     assert verdict.decision == "warn" and verdict.details["attack_type"] == "Prompt_Injection"
-    assert "ignorowania instrukcji" in verdict.reason
+    assert "ignore system instructions" in verdict.reason
 
 
 @pytest.mark.parametrize("text", BENIGN)

@@ -36,7 +36,7 @@ class ToolWhitelist:
         allowed = self.policy.is_tool_allowed(self.role, name)
         call = {"tool": name, "args": args, "allowed": allowed}
         if not allowed:
-            call.update(stage="tool_whitelist", reason=f"Narzędzie niedostępne dla roli „{self.role}”")
+            call.update(stage="tool_whitelist", reason=f"Tool not permitted for role '{self.role}'")
         self.calls.append(call)
         if allowed:
             return None

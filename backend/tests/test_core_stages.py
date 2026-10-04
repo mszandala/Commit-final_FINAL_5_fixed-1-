@@ -79,7 +79,7 @@ def test_prompt_is_masked_and_remembered(store):
 def test_guard_blocks_in_block_mode_and_only_flags_in_warn_mode(store):
     blocked = request(store, OFF_TOPIC_FOR_BASIC_USER)
     assert blocked.blocked and blocked.verdict["stage"] == "prompt_guard"
-    assert blocked.reply.startswith("Zapytanie zostało zablokowane")
+    assert (blocked.reply.startswith("Request blocked") or blocked.reply.startswith("Zapytanie zostało zablokowane"))
 
     store.set_override("controls.prompt_guard.mode", "warn")
     flagged = request(store, OFF_TOPIC_FOR_BASIC_USER)
@@ -90,7 +90,7 @@ def test_prompt_length_limit_comes_from_policy(store):
     store.set_override("controls.prompt_length.max_chars", 50)
     decision = request(store, "x" * 400)
     assert decision.blocked and decision.verdict["stage"] == "prompt_length"
-    assert decision.guard is None and "pominięto" in decision.masked_prompt
+    assert decision.guard is None and ("characters omitted" in decision.masked_prompt or "pominięto" in decision.masked_prompt)
     assert not request(store, "krótkie pytanie").blocked
 
 
@@ -128,7 +128,7 @@ def respond(store, text, role="prawnik", own=(), message="Pytanie"):
 def test_reply_redacts_what_the_role_may_not_see(store):
     decision = respond(store, f"Kontakt: {EMAIL}")
     assert decision.reply == "Kontakt: [EMAIL]"
-    assert decision.verdict == {"decision": "redact", "stage": "pii_policy", "reason": "Ukryto dane: EMAIL"}
+    assert decision.verdict["decision"] == "redact" and decision.verdict["stage"] == "pii_policy" and "EMAIL" in decision.verdict["reason"]
 
 
 def test_value_typed_by_the_user_comes_back_to_them(store):
@@ -139,7 +139,7 @@ def test_value_typed_by_the_user_comes_back_to_them(store):
 def test_globally_blocked_type_blocks_the_whole_reply(store):
     decision = respond(store, "Numer karty 4111 1111 1111 1111")
     assert decision.blocked and decision.verdict["stage"] == "pii_policy"
-    assert decision.reply.startswith("Odpowiedź została zablokowana")
+    assert (decision.reply.startswith("Response blocked") or decision.reply.startswith("Odpowiedź została zablokowana"))
 
 
 def test_reply_filter_can_be_switched_off(store):

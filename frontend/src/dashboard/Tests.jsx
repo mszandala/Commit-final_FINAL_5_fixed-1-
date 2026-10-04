@@ -115,7 +115,7 @@ function ScriptedModel({ script }) {
   return (
     <div className="space-y-1">
       <p className="text-[13px] text-grey">
-        Scripted replies, no model is called. This shows what the layer does with this output, not how a model behaves.
+        <strong className="font-semibold text-ink">Deterministic guardrail simulation:</strong> If the model responded like this, our guardrails would turn the response into that. The security layer (PII redaction, AST & access controls, policy filters) runs live to verify deterministic protection without depending on model non-determinism.
       </p>
       <ol className="list-decimal space-y-0.5 pl-5 font-mono text-[12.5px]">
         {script.map((step, i) => (
@@ -375,9 +375,7 @@ export default function Tests({ onOpenLogs }) {
             <h2 className="font-semibold text-navy">Tests</h2>
             <p className="text-sm text-grey">
               Each test is a chat turn through the security layer. Live tests use the real model ({catalog.model}); tests
-              marked mock use a scripted model reply, cost nothing and need no key. Tests with variants run once per variant
-              (for example a control on and off) and show the results side by side. Settings a test changes apply to its own
-              turn only. Test turns appear in the log.
+              marked <span className="font-medium text-ink">mock</span> test deterministic enforcement: <em>"If the model responded like this, our guardrails would turn the response into that"</em> (all security rules & PII filters run live on scripted model outputs; cost nothing, need no API key). Tests with variants run once per variant (for example a control on vs. off) and show the results side by side. Settings a test changes apply to its own turn only. Test turns appear in the log.
             </p>
           </div>
           {run && (
@@ -463,7 +461,7 @@ export default function Tests({ onOpenLogs }) {
                                   {s.title}
                                 </span>
                                 {s.mode === 'mock' && (
-                                  <Badge className="bg-amber/20 text-amber-text" title="Scripted model reply: no model is called">
+                                  <Badge className="bg-amber/20 text-amber-text" title='Mock test: "If the model responded like this, our guardrails would turn the response into that"'>
                                     mock
                                   </Badge>
                                 )}

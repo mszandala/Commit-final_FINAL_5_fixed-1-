@@ -62,12 +62,7 @@ CATEGORIES = {
     "conduct_rule": "conduct rule",
     "generic": "unspecified",
 }
-CATEGORIES_PL = {
-    "no_permission": "brak uprawnień roli",
-    "no_capability": "poza możliwościami chatbota",
-    "conduct_rule": "reguła postępowania",
-    "generic": "bez podanej przyczyny",
-}
+CATEGORIES_PL = CATEGORIES
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _log = logging.getLogger(__name__)

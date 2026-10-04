@@ -135,7 +135,7 @@ def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_pro
     state.budget.add(name, result.tokens, result.cost, SETTINGS.model)
     event = state.add_event(name, conv.id, result.verdict, result)
     if result.error:
-        raise HTTPException(502, f"Błąd wywołania modelu: {result.error}")
+        raise HTTPException(502, f"Model call error: {result.error}")
 
     return schemas.ChatResponse(
         conversation_id=conv.id,

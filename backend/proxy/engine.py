@@ -261,7 +261,7 @@ class ProxyEngine:
         over = self.budget.check(role, user_text)
         if over:
             audit.record("budget", "security", reason=over["reason"])
-            return self._reply(run, f"Zapytanie zostało zablokowane: {over['reason']}", verdict=over)
+            return self._reply(run, f"Request blocked: {over['reason']}", verdict=over)
         request = check_request(run.ctx, user_text, model=run.model)
         run.request, run.masked_prompt, run.entities = request, request.masked_prompt, request.entities
         if request.blocked:
@@ -431,9 +431,9 @@ class ProxyEngine:
                 raise ProxyError(502, "The upstream model did not return an answer", "upstream_error")
             return self._final(run, content, client_tools)
         call = refused[-1].call
-        reason = call.get("reason") or "Wywołanie narzędzia jest niedozwolone"
+        reason = call.get("reason") or "Tool call is not permitted"
         verdict = {"decision": "block", "stage": call.get("stage") or "tool_whitelist", "reason": reason}
-        return self._reply(run, f"Odpowiedź została zablokowana: {reason}", verdict=verdict)
+        return self._reply(run, f"Response blocked: {reason}", verdict=verdict)
 
     def _tool_calls(self, run: _Run, calls: list, decisions: list[ToolDecision]) -> ProxyResult:
         """Wywołania dozwolone: klient dostaje je z prawdziwymi wartościami argumentów i sam je wykonuje."""

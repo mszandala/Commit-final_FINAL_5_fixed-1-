@@ -27,9 +27,9 @@ STAGE = "company_policies"
 SEVERITY = {"log_only": 1, "warn": 2, "redact": 3, "block": 4}
 DESTINATIONS = ("internal", "external_llm", "external_destination")
 DESTINATION_LABELS = {
-    "internal": "w tym celu",
-    "external_llm": "do zewnętrznych modeli AI",
-    "external_destination": "na adresy i do usług spoza firmy",
+    "internal": "for this purpose",
+    "external_llm": "to external AI models",
+    "external_destination": "to external addresses and services",
 }
 # Ile ostatnich wyników klasyfikatora semantycznego trzymać. Ten sam tekst (np. ten sam wynik
 # narzędzia albo powtórzone pytanie) nie jest drugi raz wysyłany do lokalnego modelu.
@@ -209,8 +209,8 @@ class CompanyPolicyEngine:
 
         title = policy.titles.get(rule.document, rule.document)
         if kind == "usage":
-            message = (f"Zablokowano zgodnie z {rule.section} ({title}): tych informacji nie wolno "
-                       f"przekazywać {DESTINATION_LABELS[details['destination']]}.")
+            message = (f"Blocked pursuant to {rule.section} ({title}): this information must not "
+                       f"be sent {DESTINATION_LABELS[details['destination']]}.")
         else:
             message = rule.refusal
 
@@ -218,12 +218,12 @@ class CompanyPolicyEngine:
             return Verdict("block", message, STAGE, details, is_blocked=True)
         if action == "redact":
             details["redacted_text"] = redacted_text
-            return Verdict("redact", f"Zamaskowano informacje zgodnie z {rule.section} ({title}).",
+            return Verdict("redact", f"Information redacted pursuant to {rule.section} ({title}).",
                            STAGE, details)
         if action == "warn":
             details["warning"] = message
             return Verdict("warn", message, STAGE, details)
-        return Verdict("pass", f"Naruszenie {rule.id} tylko zalogowane (log_only)", STAGE, details)
+        return Verdict("pass", f"Violation {rule.id} logged only (log_only)", STAGE, details)
 
     def _detector_error_verdict(self, error: str, rules: list[Rule], details: dict) -> Verdict:
         action = max((r.on_detector_error for r in rules), key=SEVERITY.__getitem__)

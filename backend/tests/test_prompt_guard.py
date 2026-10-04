@@ -26,7 +26,7 @@ def test_unauthorized_role_prompt_warns_without_blocking():
     assert verdict.decision == "warn"
     assert not verdict.is_blocked
     assert verdict.has_warning
-    assert "nie ma dostępu do danych kadrowych" in verdict.reason
+    assert "does not have access to HR and payroll data" in verdict.reason
 
 
 def test_prompt_injection_warns_without_blocking():
