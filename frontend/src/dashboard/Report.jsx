@@ -148,6 +148,8 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
   const sensitivity =
     meta.sensitivityLevels.find((l) => l.id === config.sensitivity)?.label ?? `Custom (${config.piiThreshold})`
   const budget = person && budgets[person.user]
+  // Guards switched off in the config; a report saying "Prompt guard: Block" must not hide that it is off.
+  const off = (meta.filters ?? []).filter((f) => config.filters?.[f.id] === false).map((f) => f.label)
 
   const figures = [
     { label: 'Turns', value: formatNumber(report.turns) },
@@ -356,6 +358,8 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
           <dd>{sensitivity}</dd>
           <dt className="text-grey">Mask PII in chat</dt>
           <dd>{config.maskPii ? 'On' : 'Off'}</dd>
+          <dt className="text-grey">Switched off</dt>
+          <dd className={off.length ? 'text-amber-text' : ''}>{off.length ? off.join(', ') : 'None'}</dd>
         </dl>
       </Section>
     </article>
