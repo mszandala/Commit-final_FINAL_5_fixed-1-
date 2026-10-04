@@ -40,6 +40,12 @@ const timeGroup = (s) =>
           : 'local'
 const RECENT_TURNS = 10
 
+// Nearest-rank percentile: the smallest value at least `p`% of the values are at or below.
+const percentile = (values, p) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)] ?? 0
+}
+
 // Spacing in px, [loosest, normal, tightest]. The page loosens or squeezes between them to end on
 // the line of the chat's message box (the same 20px from the bottom).
 const SPACING = {
@@ -136,9 +142,9 @@ function summarize(events) {
       c[level]++
     }
     for (const [group, ms] of Object.entries(spent)) {
-      const t = (time[group] ??= { id: group, total: 0, slowest: 0 })
+      const t = (time[group] ??= { id: group, total: 0, samples: [] })
       t.total += ms
-      t.slowest = Math.max(t.slowest, ms)
+      t.samples.push(ms)
     }
     turns.push({ id: e.id, time: e.time, latencyMs: e.latencyMs, parts })
     const u = (users[e.user] ??= { user: e.user, role: e.role, turns: 0, blocked: 0, hidden: 0, refused: 0 })
@@ -149,6 +155,13 @@ function summarize(events) {
   }
   // The chatbot first, then the layer's parts by how much they take.
   const chatFirst = (key) => (a, b) => (a.id === 'chat' ? -1 : b.id === 'chat' ? 1 : b[key] - a[key])
+  // Percentiles of a part count only the turns it ran in: a PII judge that runs in one turn of
+  // ten has a p50 of its own time, not 0.
+  const spread = (samples) => ({
+    p50: percentile(samples, 50),
+    p95: percentile(samples, 95),
+    slowest: Math.max(0, ...samples),
+  })
   return {
     controls: Object.values(controls).sort((a, b) => b.block + b.warn - (a.block + a.warn) || b.block - a.block),
     purposes: Object.entries(purposes)
@@ -156,7 +169,9 @@ function summarize(events) {
       .sort(chatFirst('cost')),
     time: Object.values(time)
       .filter((t) => t.total > 0)
+      .map(({ samples, ...t }) => ({ ...t, ...spread(samples) }))
       .sort(chatFirst('total')),
+    turnTime: spread(events.map((e) => e.latencyMs)),
     turns: turns.slice(-RECENT_TURNS).reverse(),
     users: Object.values(users).sort(
       (a, b) => b.blocked + b.refused - (a.blocked + a.refused) || b.hidden - a.hidden || b.turns - a.turns,
@@ -368,7 +383,12 @@ export default function Overview({ onOpenLogs }) {
                     <thead>
                       <tr>
                         <th className={`${TH} text-left`}>Spent on</th>
-                        <th className={`${TH} text-right`}>Per turn</th>
+                        <th className={`${TH} text-right`} title="Median, over the turns it ran in">
+                          p50
+                        </th>
+                        <th className={`${TH} text-right`} title="95th percentile, over the turns it ran in">
+                          p95
+                        </th>
                         <th className={`${TH} text-right`}>Slowest</th>
                         <th className={`${TH} text-right`}>Share</th>
                       </tr>
@@ -382,12 +402,22 @@ export default function Overview({ onOpenLogs }) {
                               {group(t.id).label}
                             </span>
                           </td>
-                          <td className={`${NUM}`}>{formatNumber(t.total / events.length)} ms</td>
+                          <td className={`${NUM}`}>{formatNumber(t.p50)} ms</td>
+                          <td className={`${NUM}`}>{formatNumber(t.p95)} ms</td>
                           <td className={`${NUM}`}>{formatNumber(t.slowest)} ms</td>
                           <td className={`${NUM}`}>{percent(t.total, allTime)}</td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="font-medium">
+                      <tr>
+                        <td className={`${TD} border-t border-b-0`}>Whole turn</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p50)} ms</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p95)} ms</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.slowest)} ms</td>
+                        <td className={`${TD} border-t border-b-0`} />
+                      </tr>
+                    </tfoot>
                   </table>
                   {/* The turns take the breakdown's height without adding to it: from the headline's top
                       to the last table row, whose text the last turn's text shares a baseline with (the
