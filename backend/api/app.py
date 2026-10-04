@@ -22,6 +22,7 @@ from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
+    FILTERS,
     GLOBAL_BLOCKED_PII,
     GLOBAL_REDACTED_PII,
     MAX_SPENDING,
@@ -88,6 +89,7 @@ def _config(settings=SETTINGS, roles: dict = ROLES) -> schemas.Config:
         pii_threshold=settings.pii_threshold,
         guard_mode=settings.guard_mode,
         mask_pii=settings.mask_pii,
+        filters=dict(settings.filters),
         roles=[_role_config(name, roles) for name in roles],
     )
 
@@ -153,6 +155,7 @@ def health():
 def meta():
     return schemas.Meta(
         models=MODEL_PRESETS,
+        filters=FILTERS,
         sensitivity_levels=PII_SENSITIVITY_LEVELS,
         data_access=[{"id": area, **cfg} for area, cfg in DATA_ACCESS.items()],
         pii_tags=state.ROLE_PII_TAGS,
@@ -207,6 +210,10 @@ def update_config(update: schemas.ConfigUpdate):
             raise HTTPException(422, f"Nieznany poziom czułości: {update.sensitivity}")
         threshold = levels[update.sensitivity]
 
+    unknown_filters = [f for f in update.filters or {} if f not in SETTINGS.filters]
+    if unknown_filters:
+        raise HTTPException(422, f"Nieznane filtry: {unknown_filters}")
+
     for role in update.roles or []:
         if role.id not in state.ROLE_BY_ID:
             raise HTTPException(422, f"Nieznana rola: {role.id}")
@@ -222,9 +229,16 @@ def update_config(update: schemas.ConfigUpdate):
         SETTINGS.guard_mode = update.guard_mode
     if update.mask_pii is not None:
         SETTINGS.mask_pii = update.mask_pii
+    SETTINGS.filters.update(update.filters or {})
     for role in update.roles or []:
         state.set_role(state.ROLE_BY_ID[role.id], role.access, role.pii)
     return _config()
+
+
+@router.get("/filters", response_model=list[schemas.FilterState], tags=["config"],
+            summary="Filtry bezpieczeństwa z opisem i stanem (włączony / wyłączony); zmiana przez PUT /config")
+def filters():
+    return [{**f, "enabled": SETTINGS.filters[f["id"]]} for f in FILTERS]
 
 
 @router.get("/config/defaults", response_model=schemas.Config, tags=["config"],

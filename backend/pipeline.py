@@ -18,14 +18,13 @@ from chatbot import agent, llm_client
 from config import (
     CHATBOT_ZONE_TOOLS,
     COMPANY_POLICIES_CLASSIFIER,
-    COMPANY_POLICIES_ENABLED,
     COMPANY_POLICIES_FAIL_CLOSED,
     COMPANY_POLICIES_SEMANTIC_BLOCKS,
     COMPANY_POLICIES_STRICT_KEYWORDS,
     CONDUCT_RULES_FILE,
     COLUMN_TYPES,
+    DEFAULT_FILTERS,
     DEFAULT_TOOL_RESULT_SCAN,
-    INTENT_CLASSIFIER_ENABLED,
     MAX_PROMPT_CHARS,
     MAX_TOOL_RESULT_CHARS,
     MAX_TURN_COST,
@@ -91,6 +90,18 @@ def _notice(role: str) -> str:
             + "\n\n".join(parts) + "\n[End of notice]\n\n")
 
 
+def filter_on(name: str) -> bool:
+    """Czy filtr jest włączony w konfiguracji (można go wyłączyć z interfejsu); nieznany liczy się jako włączony."""
+    return SETTINGS.filters.get(name, True)
+
+
+class _AllowAll(dict):
+    """Polityka PII roli, która niczego nie ukrywa ani nie blokuje (wyłączony filtr odpowiedzi)."""
+
+    def get(self, key, default=None):
+        return "allow"
+
+
 _policy_engine: Optional[CompanyPolicyEngine] = None
 
 
@@ -105,7 +116,7 @@ def _security_zone_classifier(text: str, categories: dict, policy) -> dict:
 def policy_engine() -> Optional[CompanyPolicyEngine]:
     """Silnik regulaminów firmowych albo None, gdy moduł jest wyłączony w konfiguracji."""
     global _policy_engine
-    if not COMPANY_POLICIES_ENABLED:
+    if not filter_on("company_policies"):
         return None
     if _policy_engine is None:
         _policy_engine = (CompanyPolicyEngine(classifier=_security_zone_classifier)
@@ -334,7 +345,11 @@ class SecureToolGate:
         return self.whitelist.calls
 
     def __call__(self, name: str, args: dict) -> Optional[str]:
-        refusal = self.whitelist(name, args)
+        if filter_on("tool_whitelist"):
+            refusal = self.whitelist(name, args)
+        else:
+            self.whitelist.calls.append({"tool": name, "args": args, "allowed": True})
+            refusal = None
         # Subagent dopisuje własne wywołania do `calls`, zanim to się skończy — trzymamy własny wpis.
         call = self.calls[-1]
         if refusal is not None:
@@ -354,7 +369,7 @@ class SecureToolGate:
 
         # Kod do uruchomienia sprawdzamy tu, żeby odrzucenie było widoczne jako decyzja warstwy
         # bezpieczeństwa, a nie tylko jako tekst błędu narzędzia.
-        if name == "run_python":
+        if name == "run_python" and filter_on("code_guard"):
             verdict = check_code(str(args.get("code", "")))
             if verdict.is_blocked:
                 call.update(allowed=False, stage="code_guard", reason=verdict.reason)
@@ -446,7 +461,8 @@ def _plausible(entity: dict) -> bool:
 
 
 def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts=(), public_texts=(),
-                  threshold: Optional[float] = None, redact: bool = True, judge: bool = False) -> tuple[str, str, dict]:
+                  threshold: Optional[float] = None, redact: bool = True, judge: bool = False,
+                  enforce: bool = True) -> tuple[str, str, dict]:
     """Filtr odpowiedzi w kanale użytkownika.
 
     Nie ukrywa wartości, które użytkownik sam wpisał (`own_texts`) ani pochodzących ze źródeł
@@ -455,9 +471,11 @@ def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts
     Przy `redact=False` nic nie jest ukrywane (typy trafiają do "found"), ale blokady nadal działają.
     Przy `judge=True` imiona i kwoty przed ukryciem ocenia sędzia LLM: "Masa Księżyca" albo nazwa
     stanowiska to nie dane osobowe, choć detektor tak je oznacza.
+    Przy `enforce=False` (filtr wyłączony w konfiguracji) niczego nie ukrywamy ani nie blokujemy; znaczniki
+    z sejfu wracają do wartości, a log nadal dostaje wersję z etykietami.
     """
     vault = vault or Vault()
-    policy = role_policy(role)
+    policy = role_policy(role) if enforce else _AllowAll()
     own = "\n".join(own_texts)
     exempt = own + "\n" + "\n".join(public_texts)
     spans = vault.token_spans(text)
@@ -597,7 +615,12 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
         return {"decision": "block", "stage": stage_name, "reason": reason}
 
     # 0. Długość promptu: zbyt długi nie trafia do żadnego modelu, także do strażników.
-    if len(user_message) > MAX_PROMPT_CHARS:
+    # Tylko filtry wyłączone względem ustawień wdrożenia (.env); te wyłączone od startu nie są niespodzianką.
+    off = sorted(name for name, on in SETTINGS.filters.items() if not on and DEFAULT_FILTERS.get(name, True))
+    if off:
+        audit.record("filters_off", "security", filters=off)
+
+    if filter_on("prompt_length") and len(user_message) > MAX_PROMPT_CHARS:
         reason = f"Zapytanie ma {len(user_message)} znaków; limit to {MAX_PROMPT_CHARS}"
         audit.record("prompt_length", "security", chars=len(user_message), limit=MAX_PROMPT_CHARS)
         excerpt = _logged_prompt(user_message[:LOGGED_EXCERPT_CHARS], threshold)
@@ -608,15 +631,17 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     #    klasyfikator intencji. Gdy klasyfikator działa, to on rozstrzyga — słowa kluczowe same już tylko
     #    ostrzegają, bo mylą się na zwykłych zapytaniach. W trybie "block" naruszenie zatrzymuje turę.
     stage(STAGE_REQUEST)
-    guard = check_prompt(conv.role, user_message)
+    guard = (check_prompt(conv.role, user_message) if filter_on("prompt_guard")
+             else Verdict("pass", "", "prompt_guard"))
     flagged = guard.decision == "warn"
     guard_reason = _clean(guard.reason) if flagged else None
     block_mode = SETTINGS.guard_mode == "block"
-    guard_blocks = guard.is_blocked or (flagged and block_mode and not INTENT_CLASSIFIER_ENABLED)
+    intent_on = filter_on("intent_classifier")
+    guard_blocks = guard.is_blocked or (flagged and block_mode and not intent_on)
     audit.record("prompt_guard", "security", decision=guard.decision, blocked=guard_blocks,
                  reason=_clean(guard.reason) if flagged or guard_blocks else None,
                  details={k: v for k, v in guard.details.items() if k != "warning"})
-    if INTENT_CLASSIFIER_ENABLED and not guard_blocks:
+    if intent_on and not guard_blocks:
         intent = classify_intent(conv.role, user_message, conv.user_texts, hint=guard_reason)
         violation = intent["category"] not in (None, IN_SCOPE)
         if violation:
@@ -689,7 +714,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     stage(STAGE_REPLY)
     reply, logged_reply, output = filter_output(
         conv.role, raw_reply or "", conv.vault, conv.user_texts, conv.public_texts, threshold,
-        redact=SETTINGS.mask_pii, judge=PII_JUDGE_ENABLED)
+        redact=SETTINGS.mask_pii, judge=PII_JUDGE_ENABLED, enforce=filter_on("output_filter"))
     reply, tool_names = hide_tool_names(reply)
     logged_reply = hide_tool_names(logged_reply)[0]
     audit.record("output_filter", "security", restored=output["restored"], redacted=output["redacted"],

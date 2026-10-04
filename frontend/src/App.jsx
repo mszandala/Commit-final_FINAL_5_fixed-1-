@@ -20,6 +20,7 @@ const toForm = (c) => ({
   piiThreshold: c.piiThreshold,
   guardMode: c.guardMode,
   maskPii: c.maskPii,
+  filters: c.filters,
   roles: c.roles.map(({ id, label, access, pii }) => ({ id, label, access, pii })),
 })
 
@@ -30,6 +31,7 @@ const toUpdate = (form) => ({
   ...(form.sensitivity && { sensitivity: form.sensitivity }),
   guardMode: form.guardMode,
   maskPii: form.maskPii,
+  filters: form.filters,
   roles: form.roles,
 })
 

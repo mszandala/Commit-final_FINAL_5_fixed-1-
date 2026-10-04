@@ -60,7 +60,30 @@ class Settings:
     pii_threshold: float
     guard_mode: str           # "warn" | "block"
     mask_pii: bool            # maskowanie w strefie chatbota i ukrywanie PII w odpowiedzi
+    filters: dict             # id filtra z FILTERS -> czy włączony
 
+
+# Filtry, które można wyłączyć z interfejsu, żeby zobaczyć zachowanie systemu bez danego zabezpieczenia.
+# Kolejność odpowiada kolejności etapów tury. Wartości startowe: DEFAULT_FILTERS.
+FILTERS = [
+    {"id": "prompt_length", "label": "Prompt length limit",
+     "description": "Rejects prompts longer than the character limit before any model sees them"},
+    {"id": "prompt_guard", "label": "Prompt guard (keywords)",
+     "description": "Pattern check for injection attempts and requests for data outside the role"},
+    {"id": "intent_classifier", "label": "Intent classifier",
+     "description": "LLM check that the request fits the role's work"},
+    {"id": "company_policies", "label": "Company policies",
+     "description": "Company rules applied to the prompt, tool arguments, tool results and the reply"},
+    {"id": "tool_whitelist", "label": "Tool permissions",
+     "description": "Role-based allow list of tools; off, any role can call any tool"},
+    {"id": "code_guard", "label": "Code guard",
+     "description": "Static check of Python code before it runs"},
+    {"id": "output_filter", "label": "Reply filter",
+     "description": "Hides or blocks PII in the reply according to the role; off, the user sees everything"},
+]
+DEFAULT_FILTERS = {f["id"]: True for f in FILTERS}
+DEFAULT_FILTERS["intent_classifier"] = INTENT_CLASSIFIER_ENABLED
+DEFAULT_FILTERS["company_policies"] = os.getenv("COMPANY_POLICIES_ENABLED", "true").lower() == "true"
 
 SETTINGS = Settings(
     provider=LLM_PROVIDER,
@@ -69,6 +92,7 @@ SETTINGS = Settings(
     pii_threshold=PII_THRESHOLD,
     guard_mode=PROMPT_GUARD_MODE,
     mask_pii=MASKING_ENABLED,
+    filters=dict(DEFAULT_FILTERS),
 )
 
 # Modele do wyboru w formularzu konfiguracji.

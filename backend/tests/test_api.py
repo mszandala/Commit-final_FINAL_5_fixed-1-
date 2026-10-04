@@ -37,8 +37,6 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "conversations.db")
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", False)
-    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
-    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", False)   # kolejka odpowiedzi jest tylko dla chatbota
     monkeypatch.setattr(pipeline, "REFUSAL_JUDGE_ENABLED", False)
     monkeypatch.setattr(refusal_detector, "REFUSAL_EMBEDDINGS_ENABLED", False)     # same słowa kluczowe, bez modelu
     monkeypatch.setattr(config, "SPENDING_DB", tmp_path / "spending.db")
@@ -50,6 +48,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setitem(state._DEFAULT_SETTINGS, "guard_mode", "warn")
     state.reset_state()
     state.reset_config()
+    monkeypatch.setitem(pipeline.DEFAULT_FILTERS, "company_policies", False)     # wyłączone od startu, bez wpisu w logu
+    monkeypatch.setitem(pipeline.DEFAULT_FILTERS, "intent_classifier", False)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "company_policies", False)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "intent_classifier", False)   # kolejka odpowiedzi jest tylko dla chatbota
     yield
     state.reset_config()
 
@@ -233,7 +235,7 @@ def test_config_read_update_reset():
     assert client.put(f"{API}/config", json={"guardMode": "off"}).status_code == 422
 
     reset = client.post(f"{API}/config/reset").json()
-    assert reset == config and ROLES["podstawowy użytkownik"]["allowed_tools"] == ["list_projects", "read_project"]
+    assert reset == {**config, "filters": reset["filters"]} and ROLES["podstawowy użytkownik"]["allowed_tools"] == ["list_projects", "read_project"]
 
 
 def test_role_change_takes_effect_on_next_message(llm):
@@ -585,3 +587,34 @@ def test_missing_provider_key_is_reported_as_a_configuration_problem(llm, monkey
     assert client.get(f"{API}/events").json() == []           # tura się nie zaczęła, nic nie udaje blokady
     monkeypatch.setattr(SETTINGS, "provider", "ollama")        # lokalny model klucza nie potrzebuje
     assert client.get(f"{API}/health").json()["status"] == "ok"
+
+
+def test_filters_listed_in_meta_config_and_filters_endpoint():
+    ids = [f["id"] for f in client.get(f"{API}/meta").json()["filters"]]
+    assert ids == ["prompt_length", "prompt_guard", "intent_classifier", "company_policies", "tool_whitelist",
+                   "code_guard", "output_filter"]
+    assert set(client.get(f"{API}/config").json()["filters"]) == set(ids)
+    assert [f["id"] for f in client.get(f"{API}/filters").json()] == ids
+
+
+def test_update_filters_validates_and_reset_restores():
+    assert client.put(f"{API}/config", json={"filters": {"nope": False}}).status_code == 422
+    body = client.put(f"{API}/config", json={"filters": {"tool_whitelist": False}}).json()
+    assert body["filters"]["tool_whitelist"] is False and body["filters"]["code_guard"] is True
+    assert client.post(f"{API}/config/reset").json()["filters"]["tool_whitelist"] is True
+
+
+def test_disabled_tool_whitelist_lets_denied_tool_run(llm):
+    llm += [_reply(tool_calls=[_tool_call("read_employee_records", limit=1)]), _reply("Gotowe.")]
+    client.put(f"{API}/config", json={"filters": {"tool_whitelist": False}})
+    body = _chat("basic_user", "Podaj listę osób").json()
+    assert body["tools"][0]["allowed"] is True
+    steps = client.get(f"{API}/events?steps=true").json()[0]["steps"]
+    assert any(s["kind"] == "filters_off" and "Tool permissions" in s["summary"] for s in steps)
+
+
+def test_disabled_prompt_length_lets_long_prompt_through(llm):
+    llm += [_reply("ok")]
+    client.put(f"{API}/config", json={"filters": {"prompt_length": False}})
+    body = _chat("basic_user", "słowo " * config.MAX_PROMPT_CHARS).json()
+    assert body["text"] == "ok" and body["verdict"] is None

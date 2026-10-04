@@ -62,12 +62,16 @@ def sensitivity_id(threshold: float) -> Optional[str]:
 
 def default_config() -> tuple[Settings, dict]:
     """Ustawienia i role startowe, bez ich stosowania."""
-    return Settings(**_DEFAULT_SETTINGS), _DEFAULT_ROLES
+    return Settings(**copy.deepcopy(_DEFAULT_SETTINGS)), _DEFAULT_ROLES
 
 
 def reset_config() -> None:
     for key, value in _DEFAULT_SETTINGS.items():
-        setattr(SETTINGS, key, value)
+        if isinstance(value, dict):         # na miejscu: referencje do słownika zostają ważne
+            getattr(SETTINGS, key).clear()
+            getattr(SETTINGS, key).update(value)
+        else:
+            setattr(SETTINGS, key, value)
     for name, cfg in _DEFAULT_ROLES.items():
         ROLES[name].clear()
         ROLES[name].update(copy.deepcopy(cfg))

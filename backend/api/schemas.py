@@ -85,6 +85,7 @@ class Config(ApiModel):
     pii_threshold: float
     guard_mode: Literal["warn", "block"]
     mask_pii: bool
+    filters: dict[str, bool] = Field(description="Id filtra z GET /meta -> filters -> czy jest włączony")
     roles: list[RoleConfig]
 
 
@@ -96,6 +97,7 @@ class ConfigUpdate(ApiModel):
     sensitivity: Optional[str] = None
     guard_mode: Optional[Literal["warn", "block"]] = None
     mask_pii: Optional[bool] = None
+    filters: Optional[dict[str, bool]] = Field(None, description="Tylko filtry do zmiany; pominięte zostają bez zmian")
     roles: Optional[list[RoleConfig]] = None
 
 
@@ -119,8 +121,19 @@ class DataAccessArea(ApiModel):
     tools: list[str]
 
 
+class FilterInfo(ApiModel):
+    id: str
+    label: str
+    description: str
+
+
+class FilterState(FilterInfo):
+    enabled: bool
+
+
 class Meta(ApiModel):
     models: list[ModelPreset]
+    filters: list[FilterInfo] = Field(description="Filtry, które można wyłączyć; stan w GET /config -> filters")
     sensitivity_levels: list[SensitivityLevel]
     data_access: list[DataAccessArea]
     pii_tags: list[str] = Field(description="Typy PII ustawiane per rola")

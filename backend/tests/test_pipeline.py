@@ -31,9 +31,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_logger, "AUDIT_LOG", tmp_path / "events.jsonl")
     monkeypatch.setattr(pipeline, "detect_pii", lambda text, threshold=None: detect_regex_pii(text))
     monkeypatch.setattr(pipeline, "PII_JUDGE_ENABLED", True)
-    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", False)
+    monkeypatch.setitem(pipeline.DEFAULT_FILTERS, "company_policies", False)    # wyłączone od startu, bez wpisu w logu
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "company_policies", False)
     # sędziowie LLM wyłączeni domyślnie; testy, które ich dotyczą, włączają je same
-    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", False)
+    monkeypatch.setitem(pipeline.DEFAULT_FILTERS, "intent_classifier", False)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "intent_classifier", False)
     monkeypatch.setattr(pipeline, "REFUSAL_JUDGE_ENABLED", False)
     monkeypatch.setattr(pipeline.SETTINGS, "guard_mode", "warn")
     monkeypatch.setattr(refusal_detector, "REFUSAL_EMBEDDINGS_ENABLED", False)     # same słowa kluczowe, bez modelu
@@ -255,7 +257,7 @@ def policies(monkeypatch, tmp_path):
     engine = CompanyPolicyEngine(
         classifier=lambda text, categories, policy: {"category": "none", "confidence": 0.0, "reason": ""},
         audit_path=tmp_path / "policy_audit.jsonl")
-    monkeypatch.setattr(pipeline, "COMPANY_POLICIES_ENABLED", True)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "company_policies", True)
     monkeypatch.setattr(pipeline, "_policy_engine", engine)
     return engine
 
@@ -476,7 +478,7 @@ def _intent(category, reason="powód"):
 
 
 def test_intent_classifier_blocks_off_topic_prompt_before_the_chatbot(llm, env, monkeypatch):
-    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", True)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "intent_classifier", True)
     monkeypatch.setattr(pipeline.SETTINGS, "guard_mode", "block")
     llm.judges["intent_classifier"] = _intent("out_of_scope", "Pytanie o ogrodnictwo.")
     result = pipeline.run_turn(pipeline.Conversation("kadry"), "Jak wyhodować palmę?")
@@ -490,7 +492,7 @@ def test_intent_classifier_blocks_off_topic_prompt_before_the_chatbot(llm, env, 
 
 
 def test_intent_classifier_only_warns_in_warn_mode_and_sees_earlier_prompts(llm, env, monkeypatch):
-    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", True)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "intent_classifier", True)
     conv = pipeline.Conversation("kadry")
     llm.judges["intent_classifier"] = _intent("in_scope")
     llm.queue = [_reply("ok"), _reply("ok")]
@@ -503,7 +505,7 @@ def test_intent_classifier_only_warns_in_warn_mode_and_sees_earlier_prompts(llm,
 
 
 def test_intent_classifier_overrules_keyword_guard_and_fails_open(llm, env, monkeypatch):
-    monkeypatch.setattr(pipeline, "INTENT_CLASSIFIER_ENABLED", True)
+    monkeypatch.setitem(pipeline.SETTINGS.filters, "intent_classifier", True)
     monkeypatch.setattr(pipeline.SETTINGS, "guard_mode", "block")
     prompt = "Napisz ogłoszenie o pracę: szukamy doradcy klienta"   # słowo "klient" myli strażnika regex
     llm.judges["intent_classifier"] = _intent("in_scope")

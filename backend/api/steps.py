@@ -6,7 +6,7 @@ Opisy są po angielsku, jak reszta interfejsu; powody decyzji strażników zosta
 from collections import Counter
 from typing import Optional
 
-from config import CONTROLS
+from config import CONTROLS, FILTERS
 from security.intent_classifier import CATEGORIES as INTENT_CATEGORIES
 from security.refusal_detector import CATEGORIES as REFUSAL_CATEGORIES
 
@@ -14,6 +14,7 @@ LEVELS = ["info", "warn", "block"]
 
 # Rodzaje kroków (pole `kind`) i ich nazwy dla ludzi.
 STEP_KINDS = {
+    "filters_off":    "Filters off",
     "prompt_length":  "Prompt length",
     "prompt_guard":   "Prompt guard",
     "intent":         "Intent check",
@@ -169,7 +170,13 @@ def _refusal(e: dict) -> tuple[str, str]:
     return "warn", f"The chatbot declined the request ({cause}); detected by {how}"
 
 
+def _filters_off(e: dict) -> tuple[str, str]:
+    names = {f["id"]: f["label"] for f in FILTERS}
+    return "warn", "Disabled in the configuration: " + ", ".join(names.get(f, f) for f in e.get("filters", []))
+
+
 _DESCRIBE = {
+    "filters_off": _filters_off,
     "prompt_length": lambda e: ("block", f"Prompt has {e.get('chars')} characters; the limit is {e.get('limit')}"),
     "prompt_guard": _prompt_guard,
     "intent": _intent,

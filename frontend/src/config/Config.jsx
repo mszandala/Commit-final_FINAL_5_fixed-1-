@@ -60,7 +60,7 @@ function Checkbox({ checked, onChange, label }) {
 }
 
 export default function Config({ config, dirty, error, onChange, onReset, onSave }) {
-  const { models: MODELS, sensitivityLevels: SENSITIVITY, dataAccess: DATA_ACCESS, piiTags, piiLabels } = useMeta()
+  const { models: MODELS, sensitivityLevels: SENSITIVITY, dataAccess: DATA_ACCESS, piiTags, piiLabels, filters: FILTERS } = useMeta()
   const [showKey, setShowKey] = useState(false)
   const set = (key, value) => onChange({ ...config, [key]: value })
 
@@ -225,6 +225,26 @@ export default function Config({ config, dirty, error, onChange, onReset, onSave
               </span>
             </label>
           </Row>
+        </Section>
+
+        <Section title="Filters">
+          {FILTERS.map((f) => (
+            <Row key={f.id} label={f.label}>
+              <label className="flex cursor-pointer items-center gap-3 pt-1">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={config.filters[f.id]}
+                  onChange={(e) => set('filters', { ...config.filters, [f.id]: e.target.checked })}
+                  aria-label={f.label}
+                  className="relative h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-line transition-colors before:absolute before:left-0.5 before:top-0.5 before:size-4 before:rounded-full before:bg-white before:transition-transform checked:bg-navy checked:before:translate-x-4"
+                />
+                <span className="text-sm text-grey">
+                  {config.filters[f.id] ? f.description : `Off: ${f.description}`}
+                </span>
+              </label>
+            </Row>
+          ))}
         </Section>
 
         <Section title="Roles">
