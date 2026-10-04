@@ -44,7 +44,13 @@ PROMPT_GUARD_MODE = os.getenv("PROMPT_GUARD_MODE", "block")
 # Włączony rozstrzyga zamiast słów kluczowych strażnika; wyłączony = decyduje sam strażnik regex.
 INTENT_CLASSIFIER_ENABLED = os.getenv("INTENT_CLASSIFIER_ENABLED", "true").lower() == "true"
 
-AUDIT_LOG = Path(__file__).parent / "audit" / "events.jsonl"
+# Katalog zapisywalnego stanu: log audytu, baza rozmów i baza wydatków. Domyślnie obok kodu; w kontenerze
+# z systemem plików tylko do odczytu wskaż wolumen zmienną STATE_DIR (np. /state).
+STATE_DIR = Path(os.getenv("STATE_DIR") or Path(__file__).parent)
+AUDIT_LOG = STATE_DIR / "audit" / "events.jsonl"
+# Gdzie trafiają zdarzenia audytu: "file" (domyślnie), "stdout" (JSON w linii, np. dla `docker logs`),
+# "both" albo "none" (log tylko w pamięci i w bazie rozmów).
+AUDIT_SINK = os.getenv("AUDIT_SINK", "file").lower()
 
 
 @dataclass
@@ -139,7 +145,7 @@ MAX_TURN_TOKENS = int(os.getenv("MAX_TURN_TOKENS", "40000"))
 MAX_TURN_COST = float(os.getenv("MAX_TURN_COST", "0.05"))
 # Najdłuższy wynik narzędzia (w znakach) przekazywany modelowi; dłuższy jest przycinany.
 MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "24000"))
-SPENDING_DB = Path(__file__).parent / "spending.db"
+SPENDING_DB = STATE_DIR / "spending.db"
 
 # Moduł regulaminów firmowych (security/company_policies) w przebiegu tury.
 COMPANY_POLICIES_ENABLED = os.getenv("COMPANY_POLICIES_ENABLED", "true").lower() == "true"
