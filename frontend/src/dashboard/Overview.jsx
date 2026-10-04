@@ -13,6 +13,8 @@ const PURPOSES = {
   chat: { label: 'Chatbot', color: 'bg-navy' },
   company_policy_classifier: { label: 'Policy classifier', color: 'bg-blue' },
   pii_judge: { label: 'PII judge', color: 'bg-teal' },
+  intent_classifier: { label: 'Intent classifier', color: 'bg-blue-light' },
+  refusal_judge: { label: 'Refusal judge', color: 'bg-grey' },
 }
 const OTHER_PURPOSE = { color: 'bg-grey' }
 const LOCAL_CHECKS = {
