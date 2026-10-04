@@ -1,16 +1,24 @@
-import { FileText, X } from 'lucide-react'
-import { formatSize } from '../format'
+import { FileText, Image, LoaderCircle, X } from 'lucide-react'
 
-// Mock, shown in red: the API takes text only, so files never reach the backend.
+const STYLES = {
+  reading: 'border-line text-grey',
+  done: 'border-line text-ink',
+  error: 'border-red text-red-text',
+}
+
+// A file chip: in the composer while its text is read, and above the sent message.
 export default function Attachment({ file, onRemove }) {
+  const Icon = file.status === 'reading' ? LoaderCircle : /\.(png|jpe?g)$/i.test(file.name) ? Image : FileText
+
   return (
     <span
-      title="Mock: not sent to the backend"
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-red bg-white py-1 pr-1.5 pl-2 text-sm text-red-text"
+      title={file.status === 'error' ? `${file.name}: ${file.error}` : file.name}
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-md border bg-white py-1 pl-2 text-sm ${STYLES[file.status]} ${onRemove ? 'pr-1.5' : 'pr-2'}`}
     >
-      <FileText size={14} className="shrink-0" />
+      <Icon size={14} className={`shrink-0 ${file.status === 'reading' ? 'animate-spin' : ''} ${file.status === 'done' ? 'text-grey' : ''}`} />
       <span className="truncate">{file.name}</span>
-      <span className="shrink-0">{formatSize(file.size)}</span>
+      {file.status === 'reading' && <span className="shrink-0 tabular-nums">{file.percent}%</span>}
+      {file.status === 'error' && <span className="shrink-0">{file.error}</span>}
       {onRemove && (
         <button
           type="button"

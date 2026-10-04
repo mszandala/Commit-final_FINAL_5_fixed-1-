@@ -2,14 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { getEvents, subscribeEvents } from '../events'
 import { formatNumber, formatUsd } from '../format'
 import { useMeta } from '../meta'
+import { controlCounts, isBlocked, isHidden, isRefused, percentile } from './turns'
 
 // Answers "are we safe and what does it cost?" from the events the log already holds. Controls,
 // turns and users open the log on the turns behind them.
-
-// A turn graded block by a failed model call is an error, not a block.
-const isBlocked = (e) => e.level === 'block' && e.decision !== 'Error'
-const isRefused = (e) => e.steps.some((s) => s.kind === 'refusal')
-const isHidden = (e) => e.hidden.length > 0
 
 // Model calls by who made them: the chatbot, or the layer's own checks. Colours follow the
 // purpose, so a missing one never repaints the others.
@@ -105,14 +101,11 @@ const LEVEL_NAMES = { block: 'Blocked', warn: 'Warning' }
 const percent = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}%` : '0%')
 
 function summarize(events) {
-  // Turns where each check flagged or blocked something, at that check's worst level in the turn.
-  const controls = {}
   const purposes = {}
   const users = {}
   const time = {}
   const turns = []
   for (const e of events) {
-    const worst = {}
     // Consecutive steps of one group become one segment of the turn's bar.
     const parts = []
     const spent = {}
@@ -129,16 +122,11 @@ function summarize(events) {
         p.tokens += s.details.tokens ?? 0
         p.cost += s.details.cost ?? 0
       }
-      if (s.level !== 'info' && s.kind !== 'error') worst[s.kind] = worst[s.kind] === 'block' ? 'block' : s.level
-    }
-    for (const [kind, level] of Object.entries(worst)) {
-      const c = (controls[kind] ??= { kind, block: 0, warn: 0 })
-      c[level]++
     }
     for (const [group, ms] of Object.entries(spent)) {
-      const t = (time[group] ??= { id: group, total: 0, slowest: 0 })
+      const t = (time[group] ??= { id: group, total: 0, samples: [] })
       t.total += ms
-      t.slowest = Math.max(t.slowest, ms)
+      t.samples.push(ms)
     }
     turns.push({ id: e.id, time: e.time, latencyMs: e.latencyMs, parts })
     const u = (users[e.user] ??= { user: e.user, role: e.role, turns: 0, blocked: 0, hidden: 0, refused: 0 })
@@ -149,14 +137,23 @@ function summarize(events) {
   }
   // The chatbot first, then the layer's parts by how much they take.
   const chatFirst = (key) => (a, b) => (a.id === 'chat' ? -1 : b.id === 'chat' ? 1 : b[key] - a[key])
+  // Percentiles of a part count only the turns it ran in: a PII judge that runs in one turn of
+  // ten has a p50 of its own time, not 0.
+  const spread = (samples) => ({
+    p50: percentile(samples, 50),
+    p95: percentile(samples, 95),
+    slowest: Math.max(0, ...samples),
+  })
   return {
-    controls: Object.values(controls).sort((a, b) => b.block + b.warn - (a.block + a.warn) || b.block - a.block),
+    controls: controlCounts(events),
     purposes: Object.entries(purposes)
       .map(([id, p]) => ({ id, ...p }))
       .sort(chatFirst('cost')),
     time: Object.values(time)
       .filter((t) => t.total > 0)
+      .map(({ samples, ...t }) => ({ ...t, ...spread(samples) }))
       .sort(chatFirst('total')),
+    turnTime: spread(events.map((e) => e.latencyMs)),
     turns: turns.slice(-RECENT_TURNS).reverse(),
     users: Object.values(users).sort(
       (a, b) => b.blocked + b.refused - (a.blocked + a.refused) || b.hidden - a.hidden || b.turns - a.turns,
@@ -238,8 +235,9 @@ function ShareBar({ parts }) {
 
 const timeOf = (d) => d.toLocaleTimeString('en-GB')
 
-const TH = 'border-b border-line px-1.5 pb-(--cell) text-[13px] font-normal text-grey'
+const TH = 'whitespace-nowrap border-b border-line px-1.5 pb-(--cell) text-[13px] font-normal text-grey'
 const TD = 'border-b border-line px-1.5 py-(--cell)'
+const NUM = `${TD} whitespace-nowrap text-right`
 
 export default function Overview({ onOpenLogs }) {
   const meta = useMeta()
@@ -265,7 +263,9 @@ export default function Overview({ onOpenLogs }) {
         {events.length === 0 ? (
           <p className="py-10 text-center text-grey">No turns yet</p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(22rem,1fr))] gap-(--gap)">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(max(22rem,calc((100%-var(--gap))/2)),1fr))] gap-(--gap)">
+            {/* Two columns, or one when two would be under 22rem each; never a third, which the
+                full-width panels would hold open as an empty slot beside the first row. */}
             <Panel
               title="Most triggered controls"
               aside={
@@ -323,14 +323,14 @@ export default function Overview({ onOpenLogs }) {
                       {stats.purposes.map((p) => (
                         <tr key={p.id}>
                           <td className={TD}>
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5">
                               <span className={`size-2 rounded-full ${purpose(p.id).color}`} />
                               {purpose(p.id).label}
                             </span>
                           </td>
-                          <td className={`${TD} text-right`}>{formatNumber(p.calls)}</td>
-                          <td className={`${TD} text-right`}>{formatNumber(p.tokens)}</td>
-                          <td className={`${TD} text-right`}>{formatUsd(p.cost)}</td>
+                          <td className={`${NUM}`}>{formatNumber(p.calls)}</td>
+                          <td className={`${NUM}`}>{formatNumber(p.tokens)}</td>
+                          <td className={`${NUM}`}>{formatUsd(p.cost)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -365,7 +365,12 @@ export default function Overview({ onOpenLogs }) {
                     <thead>
                       <tr>
                         <th className={`${TH} text-left`}>Spent on</th>
-                        <th className={`${TH} text-right`}>Per turn</th>
+                        <th className={`${TH} text-right`} title="Median, over the turns it ran in">
+                          p50
+                        </th>
+                        <th className={`${TH} text-right`} title="95th percentile, over the turns it ran in">
+                          p95
+                        </th>
                         <th className={`${TH} text-right`}>Slowest</th>
                         <th className={`${TH} text-right`}>Share</th>
                       </tr>
@@ -374,17 +379,27 @@ export default function Overview({ onOpenLogs }) {
                       {stats.time.map((t) => (
                         <tr key={t.id}>
                           <td className={TD} title={group(t.id).hint}>
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5">
                               <span className={`size-2 rounded-full ${group(t.id).color}`} />
                               {group(t.id).label}
                             </span>
                           </td>
-                          <td className={`${TD} text-right`}>{formatNumber(t.total / events.length)} ms</td>
-                          <td className={`${TD} text-right`}>{formatNumber(t.slowest)} ms</td>
-                          <td className={`${TD} text-right`}>{percent(t.total, allTime)}</td>
+                          <td className={`${NUM}`}>{formatNumber(t.p50)} ms</td>
+                          <td className={`${NUM}`}>{formatNumber(t.p95)} ms</td>
+                          <td className={`${NUM}`}>{formatNumber(t.slowest)} ms</td>
+                          <td className={`${NUM}`}>{percent(t.total, allTime)}</td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="font-medium">
+                      <tr>
+                        <td className={`${TD} border-t border-b-0`}>Whole turn</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p50)} ms</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.p95)} ms</td>
+                        <td className={`${NUM} border-t border-b-0`}>{formatNumber(stats.turnTime.slowest)} ms</td>
+                        <td className={`${TD} border-t border-b-0`} />
+                      </tr>
+                    </tfoot>
                   </table>
                   {/* The turns take the breakdown's height without adding to it: from the headline's top
                       to the last table row, whose text the last turn's text shares a baseline with (the
@@ -458,14 +473,14 @@ export default function Overview({ onOpenLogs }) {
                           <span className="shrink-0 text-[13px] text-grey">{u.role}</span>
                         </button>
                       </td>
-                      <td className={`${TD} text-right`}>{formatNumber(u.turns)}</td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>{formatNumber(u.turns)}</td>
+                      <td className={`${NUM}`}>
                         <Count n={u.blocked} />
                       </td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>
                         <Count n={u.hidden} />
                       </td>
-                      <td className={`${TD} text-right`}>
+                      <td className={`${NUM}`}>
                         <Count n={u.refused} />
                       </td>
                     </tr>
