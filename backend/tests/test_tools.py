@@ -88,3 +88,21 @@ def test_notice_includes_user_role():
     assert "Company data areas available to this role: Projects, HR data." in prompt
     assert "read_employee_records" not in prompt and "Bank clients" not in prompt
     assert "Reply in the language of the user's message" in prompt
+
+
+def test_summaries_cover_the_whole_file_and_hide_small_groups(data_dir):
+    rows = "".join(f"{20 + i},Sales,{1000 + i}\n" for i in range(60)) + "50,HR,9000\n"
+    (data_dir / "employee_data" / "WA_Fn-UseC_-HR-Employee-Attrition.csv").write_text(
+        "Age,Department,MonthlyIncome\n" + rows, encoding="utf-8")
+    assert run_tool("summarize_employee_records", {}) == "group,rows,count\nall,61,61\n"      # ponad 50 wierszy
+    by_department = run_tool("summarize_employee_records",
+                             {"operation": "avg", "column": "MonthlyIncome", "group_by": "Department"})
+    assert "Sales,60,1029.5" in by_department
+    assert "HR,1,[hidden: fewer than 5 rows]" in by_department and "9000" not in by_department
+    one_person = run_tool("summarize_employee_records", {"operation": "max", "column": "MonthlyIncome",
+                                                         "filter_column": "Age", "filter_value": "50"})
+    assert "9000" not in one_person
+    assert run_tool("summarize_employee_records", {"operation": "median"}).startswith("Unknown operation")
+    assert run_tool("summarize_employee_records", {"operation": "sum"}).startswith("Operation 'sum' needs")
+    assert run_tool("summarize_employee_records", {"group_by": "MonthlyIncome"}).startswith("Cannot group by")
+    assert is_allowed("kadry", "summarize_employee_records") and not is_allowed("kadry", "summarize_client_records")

@@ -220,7 +220,8 @@ def test_config_read_update_reset():
     assert updated["apiKeyHint"] == "1234" and "nowy-klucz" not in json.dumps(updated)
     basic = next(r for r in updated["roles"] if r["id"] == "basic_user")
     assert basic["access"] == ["projects", "hr"] and basic["pii"] == ["SALARY"]
-    assert ROLES["podstawowy użytkownik"]["allowed_tools"] == ["list_projects", "read_project", "read_employee_records"]
+    assert ROLES["podstawowy użytkownik"]["allowed_tools"] == ["list_projects", "read_project", "read_employee_records",
+                                                               "summarize_employee_records"]
     # narzędzia spoza formularza (pliki ogólne administratora) zostają
     assert "read_file" in ROLES["administrator"]["allowed_tools"]
 

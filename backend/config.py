@@ -150,8 +150,8 @@ CONDUCT_RULES_FILE = Path(__file__).parent / "security" / "rules.txt"
 # Narzędzia pogrupowane po domenach danych (podfoldery data/).
 _GENERIC_TOOLS = ["list_files", "read_file"]
 _PROJECTS  = ["list_projects", "read_project"]
-_HR        = ["read_employee_records"]
-_CLIENTS   = ["read_client_records"]
+_HR        = ["read_employee_records", "summarize_employee_records"]
+_CLIENTS   = ["read_client_records", "summarize_client_records"]
 _CAMPAIGNS = ["read_bank_campaigns"]
 _MARKET    = ["read_stock_prices", "list_earnings_calls", "read_earnings_call"]
 _CODE      = ["run_python"]
@@ -337,6 +337,9 @@ COLUMN_TYPES = {
 TOOL_RESULT_SCAN = {
     "read_client_records":   "columns",
     "read_employee_records": "columns",
+    # statystyki po całym pliku: bez identyfikatorów (grupowanie po nich jest odrzucane w narzędziu)
+    "summarize_client_records":   "none",
+    "summarize_employee_records": "none",
     "read_bank_campaigns":   "none",
     "read_stock_prices":     "none",
     "list_projects":         "none",
