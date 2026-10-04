@@ -6,7 +6,6 @@ __pychache__/
 *.pyc
 .env
 pyvenv.cfg
-backend/data/vector_db/
 
 backend/audit/*.jsonl
 backend/audit/*.db

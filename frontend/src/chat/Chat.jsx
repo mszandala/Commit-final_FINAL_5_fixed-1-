@@ -145,17 +145,6 @@ export default function Chat({ people }) {
         />
       </header>
 
-      <div className="flex flex-wrap items-center justify-between border-b border-line bg-page/60 px-5 py-2 text-xs text-grey">
-        <div className="flex items-center gap-2">
-          <span className="inline-block size-2 rounded-full bg-emerald-500" />
-          <span className="font-medium text-ink">Active Security Guardrails:</span>
-          <span>Deterministic AST, PII Masking, Tool Whitelist, RBAC & Policy Engine</span>
-        </div>
-        <span className="text-[11px] text-grey/80" title="Security controls, AST analysis, PII masking, and budget enforcement run live. Model responses are generated or simulated based on environment.">
-          Mode: Live Guardrail Enforcement
-        </span>
-      </div>
-
       {/* `wrap-break-word` is inherited, so a long unbroken word wraps in every message instead of overflowing. */}
       <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5 wrap-break-word">
         {items.map((item) => (

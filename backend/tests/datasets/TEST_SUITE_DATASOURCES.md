@@ -94,10 +94,10 @@ This maps to the brief's *"Block vs Redact or adherence %"* threshold model (For
 
 | Risk / requirement | Covered by | Example case |
 |---|---|---|
-| LLM01 Prompt Injection | input | `TEST-SALARY-DELIM-005`, `TEST-ATK-UNICODE-SMUGGLE-041` |
+| LLM01 Prompt Injection | input | `TEST-ATK-DELIM-USER-022`, `TEST-ATK-UNICODE-SMUGGLE-041` |
 | LLM02 Sensitive Info Disclosure | output | `OUT-LEAK-SALARY-001`, `OUT-LEAK-PII-001` |
 | LLM03 Supply Chain | historical | `HIST-TYPOSQUAT-006`, `HIST-REMOTE-CODE-007` |
-| LLM04 Data/Model Poisoning | input (indirect inj.) | `TEST-INJECT-INDIRECT-004` |
+| LLM04 Data/Model Poisoning | input (indirect inj.) | `TEST-ATK-INDIRECT-029` |
 | LLM05 Improper Output Handling | output / historical | `OUT-EXFIL-MARKDOWN-001`, `HIST-RCE-001` |
 | LLM06 Excessive Agency | input (tool exploits) | `TEST-ATK-MCP-SQL-026`, `TEST-ATK-MCP-SHELL-028` |
 | LLM07 System Prompt Leakage | input | `TEST-ATK-SYSLEAK-024` |
@@ -108,9 +108,6 @@ This maps to the brief's *"Block vs Redact or adherence %"* threshold model (For
 | **Budget & resource (Formal Req. 3)** | budget | whole `budget_resource_tests.json` |
 | **Historical attack mitigation (Formal Req. 4)** | historical | whole `historical_attack_tests.json` |
 | **Positive/negative self-test (Formal Req. 6)** | all files | POSITIVE cases in each |
-
-> OWASP LLM Top 10 (2025) category names/IDs above are from memory — verify against the current
-> OWASP list before the presentation.
 
 ---
 
