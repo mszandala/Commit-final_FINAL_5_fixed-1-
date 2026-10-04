@@ -38,6 +38,8 @@ function summarize(turns, picked) {
     chat += cost.chat
     security += cost.security
     const p = (people[e.user] ??= blank({ user: e.user, role: e.role, roleId: e.roleId }))
+    // Live test turns share one user across roles.
+    if (p.role !== e.role) p.role = ''
     p.turns++
     p.blocked += isBlocked(e)
     p.hidden += isHidden(e)
@@ -145,7 +147,9 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
   const model = meta.models.find((m) => m.id === config.model)?.label ?? config.model
   const sensitivity =
     meta.sensitivityLevels.find((l) => l.id === config.sensitivity)?.label ?? `Custom (${config.piiThreshold})`
-  const budget = person && budgets[person.roleId]
+  const budget = person && budgets[person.user]
+  // Guards switched off in the config; a report saying "Prompt guard: Block" must not hide that it is off.
+  const off = (meta.filters ?? []).filter((f) => config.filters?.[f.id] === false).map((f) => f.label)
 
   const figures = [
     { label: 'Turns', value: formatNumber(report.turns) },
@@ -175,7 +179,7 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
           <h1 className="text-xl font-semibold text-navy">Security report</h1>
           <p className="mt-1 text-[15px] [overflow-wrap:anywhere]">
             {person
-              ? `${person.user}, ${person.role}`
+              ? [person.user, person.role].filter(Boolean).join(', ')
               : people.length
                 ? people.map((p) => p.user).join(', ')
                 : 'All users'}
@@ -253,7 +257,7 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
                 </thead>
                 <tbody>
                   {report.people.map((p) => {
-                    const b = budgets[p.roleId]
+                    const b = budgets[p.user]
                     return (
                       <tr key={p.user}>
                         <td className={`${TD} w-full`}>
@@ -354,6 +358,8 @@ function ReportDoc({ people, from, to, generated, report, budgets, config }) {
           <dd>{sensitivity}</dd>
           <dt className="text-grey">Mask PII in chat</dt>
           <dd>{config.maskPii ? 'On' : 'Off'}</dd>
+          <dt className="text-grey">Switched off</dt>
+          <dd className={off.length ? 'text-amber-text' : ''}>{off.length ? off.join(', ') : 'None'}</dd>
         </dl>
       </Section>
     </article>
@@ -392,7 +398,8 @@ export default function Report({ config }) {
   for (const e of inPeriod) counts[e.user] = (counts[e.user] ?? 0) + 1
   const turns = names.length ? inPeriod.filter((e) => names.includes(e.user)) : inPeriod
   const report = useMemo(() => summarize(turns, picked), [all, start, end, selected, people])
-  const budgets = Object.fromEntries(roles.map((r) => [r.id, r.budget]))
+  // A budget belongs to a role's example user; live test turns use the roles without their budgets.
+  const budgets = Object.fromEntries(roles.map((r) => [r.user, r.budget]))
   const who = !picked.length
     ? 'all-users'
     : picked.length <= 3

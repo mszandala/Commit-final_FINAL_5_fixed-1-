@@ -7,8 +7,8 @@ import Tests from './Tests'
 const TABS = [
   { id: 'logs', label: 'Logs' },
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'tests', label: 'Tests' },
   { id: 'report', label: 'Report' },
+  { id: 'tests', label: 'Tests' },
 ]
 
 export default function Dashboard({ config, configOpen, onOpenConfig, onLeaveConfig }) {
@@ -51,8 +51,8 @@ export default function Dashboard({ config, configOpen, onOpenConfig, onLeaveCon
       <div role="tabpanel" className="min-h-0 flex-1">
         {tab === 'logs' && <Logs initial={logsView} />}
         {tab === 'dashboard' && <Overview onOpenLogs={(view) => show('logs', view)} />}
-        {tab === 'tests' && <Tests onOpenLogs={(view) => show('logs', view)} />}
         {tab === 'report' && <Report config={config} />}
+        {tab === 'tests' && <Tests onOpenLogs={(view) => show('logs', view)} />}
       </div>
     </section>
   )

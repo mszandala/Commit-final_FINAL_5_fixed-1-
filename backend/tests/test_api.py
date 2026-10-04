@@ -638,7 +638,8 @@ def test_live_tests_run_in_background_and_land_in_the_log(llm):
         time.sleep(0.05)
     result = run["results"][scenario["id"]]
     assert result["status"] == "passed" and result["outcome"] == "blocked" and result["stage"] == "prompt_length"
-    assert client.get(f"{API}/events/{result['eventId']}").json()["stage"] == "prompt_length"
+    event = client.get(f"{API}/events/{result['eventId']}").json()
+    assert event["stage"] == "prompt_length" and event["user"] == "Live test" and event["role"] == "IT"
     assert pipeline.MAX_PROMPT_CHARS == config.MAX_PROMPT_CHARS          # limit testu przywrócony
 
     assert client.post(f"{API}/tests/runs", json={"ids": ["no-such-test"]}).status_code == 422

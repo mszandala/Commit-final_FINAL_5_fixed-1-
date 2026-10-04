@@ -41,15 +41,20 @@ const asList = (v) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
 const sumOf = (result, key) =>
   result.variants ? result.variants.reduce((sum, v) => sum + (v[key] ?? 0), 0) : (result[key] ?? 0)
 
+// Scenarios only ever change access for their own role, the one whose label the catalog sends.
+const roleLabelsOf = (scenario) => ({ [scenario.role]: scenario.roleLabel })
+
 // The settings a scenario changes for its own turn, as short labels.
-function configLabels(config = {}, meta) {
+function configLabels(config = {}, meta, roleLabels = {}) {
   const filterLabel = (id) => meta.filters.find((f) => f.id === id)?.label ?? id
   const areaLabel = (id) => meta.dataAccess.find((a) => a.id === id)?.label ?? id
   return [
     config.guardMode && `Guard mode: ${config.guardMode}`,
     config.maskPii !== undefined && `Masking: ${config.maskPii ? 'on' : 'off'}`,
     ...Object.entries(config.filters ?? {}).map(([id, on]) => `${filterLabel(id)}: ${on ? 'on' : 'off'}`),
-    ...Object.entries(config.roles ?? {}).map(([role, areas]) => `${role} access: ${areas.map(areaLabel).join(', ')}`),
+    ...Object.entries(config.roles ?? {}).map(
+      ([role, areas]) => `${roleLabels[role] ?? role} access: ${areas.map(areaLabel).join(', ')}`,
+    ),
     ...Object.entries(config.limits ?? {}).map(([key, v]) => LIMIT_LABELS[key]?.(v) ?? `${key}: ${v}`),
   ].filter(Boolean)
 }
@@ -132,8 +137,8 @@ function Field({ label, children }) {
   )
 }
 
-function SettingBadges({ config, meta }) {
-  const labels = configLabels(config, meta)
+function SettingBadges({ config, meta, roleLabels }) {
+  const labels = configLabels(config, meta, roleLabels)
   if (labels.length === 0) return null
   return (
     <span className="flex flex-wrap gap-1.5">
@@ -234,7 +239,7 @@ function VariantCard({ scenario, variant, result, onOpenLogs }) {
           <Expected expect={variant.expect ?? scenario.expect} />
         </span>
       </div>
-      <SettingBadges config={variant.config} meta={meta} />
+      <SettingBadges config={variant.config} meta={meta} roleLabels={roleLabelsOf(scenario)} />
       {result ? (
         <ResultFields scenario={scenario} result={result} onOpenLogs={onOpenLogs} />
       ) : (
@@ -276,9 +281,9 @@ function Details({ scenario, result, onOpenLogs }) {
         </div>
       ) : (
         <>
-          {configLabels(scenario.config, meta).length > 0 && (
+          {configLabels(scenario.config, meta, roleLabelsOf(scenario)).length > 0 && (
             <Field label="Settings">
-              <SettingBadges config={scenario.config} meta={meta} />
+              <SettingBadges config={scenario.config} meta={meta} roleLabels={roleLabelsOf(scenario)} />
             </Field>
           )}
           {result ? (
@@ -303,7 +308,6 @@ export default function Tests({ onOpenLogs }) {
   const [error, setError] = useState(null)
   const [open, setOpen] = useState({})
   const running = run?.status === 'running'
-  const wasRunning = useRef(false)
 
   async function load() {
     setError(null)
@@ -320,24 +324,26 @@ export default function Tests({ onOpenLogs }) {
     load()
   }, [])
 
-  // Poll while a run lasts; when it ends, the log picks up the test turns.
+  // Poll while a run lasts.
   useEffect(() => {
-    if (running) {
-      wasRunning.current = true
-      const timer = setInterval(async () => {
-        try {
-          setRun(await getTestRun())
-        } catch (e) {
-          setError(e.message)
-        }
-      }, POLL_MS)
-      return () => clearInterval(timer)
-    }
-    if (wasRunning.current) {
-      wasRunning.current = false
-      refreshEvents()
-    }
+    if (!running) return
+    const timer = setInterval(async () => {
+      try {
+        setRun(await getTestRun())
+      } catch (e) {
+        setError(e.message)
+      }
+    }, POLL_MS)
+    return () => clearInterval(timer)
   }, [running])
+
+  // Each finished test is a turn in the log, so the log follows the run instead of waiting for its end.
+  const finished = Object.keys(run?.results ?? {}).length
+  const seen = useRef(finished)
+  useEffect(() => {
+    if (finished > seen.current) refreshEvents()
+    seen.current = finished
+  }, [finished])
 
   async function start(ids) {
     setError(null)
@@ -416,9 +422,9 @@ export default function Tests({ onOpenLogs }) {
                   <tr>
                     <th className={`${TH} w-10`} />
                     <th className={TH}>Test</th>
-                    <th className={`${TH} w-36`}>Role</th>
-                    <th className={`${TH} w-56`}>Expected</th>
-                    <th className={`${TH} w-56`}>Result</th>
+                    <th className={`${TH} w-32`}>Role</th>
+                    <th className={`${TH} w-48`}>Expected</th>
+                    <th className={`${TH} w-48`}>Result</th>
                     <th className={`${TH} w-20 text-right`}>Latency</th>
                     <th className={`${TH} w-14`} />
                   </tr>
