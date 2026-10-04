@@ -1,6 +1,6 @@
 # AI Control Layer - Who Let the Prompts Out?
 
-Live on: [https://ai-control-layer-ui.onrender.com/
+Demo live on: [https://ai-control-layer-ui.onrender.com/
 ](https://ai-control-layer-ui.onrender.com/)
 
 
