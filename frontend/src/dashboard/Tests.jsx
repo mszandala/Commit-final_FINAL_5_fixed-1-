@@ -36,15 +36,18 @@ const LIMIT_LABELS = {
 
 const asList = (v) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
 
-// The settings a scenario changes for its own turn, as short labels.
-function configLabels(config = {}, meta) {
+// The settings a scenario changes for its own turn, as short labels. Scenarios only ever change
+// access for their own role, the one whose label the catalog sends.
+function configLabels(config = {}, meta, roleLabels) {
   const filterLabel = (id) => meta.filters.find((f) => f.id === id)?.label ?? id
   const areaLabel = (id) => meta.dataAccess.find((a) => a.id === id)?.label ?? id
   return [
     config.guardMode && `Guard mode: ${config.guardMode}`,
     config.maskPii !== undefined && `Masking: ${config.maskPii ? 'on' : 'off'}`,
     ...Object.entries(config.filters ?? {}).map(([id, on]) => `${filterLabel(id)}: ${on ? 'on' : 'off'}`),
-    ...Object.entries(config.roles ?? {}).map(([role, areas]) => `${role} access: ${areas.map(areaLabel).join(', ')}`),
+    ...Object.entries(config.roles ?? {}).map(
+      ([role, areas]) => `${roleLabels[role] ?? role} access: ${areas.map(areaLabel).join(', ')}`,
+    ),
     ...Object.entries(config.limits ?? {}).map(([key, v]) => LIMIT_LABELS[key]?.(v) ?? `${key}: ${v}`),
   ].filter(Boolean)
 }
@@ -81,7 +84,7 @@ function Field({ label, children }) {
 
 function Details({ scenario, result, onOpenLogs }) {
   const meta = useMeta()
-  const labels = configLabels(scenario.config, meta)
+  const labels = configLabels(scenario.config, meta, { [scenario.role]: scenario.roleLabel })
   return (
     <div className="space-y-1 bg-page/60 px-10 py-3">
       <Field label="Prompt">
@@ -170,7 +173,6 @@ export default function Tests({ onOpenLogs }) {
   const [error, setError] = useState(null)
   const [open, setOpen] = useState({})
   const running = run?.status === 'running'
-  const wasRunning = useRef(false)
 
   async function load() {
     setError(null)
@@ -187,24 +189,26 @@ export default function Tests({ onOpenLogs }) {
     load()
   }, [])
 
-  // Poll while a run lasts; when it ends, the log picks up the test turns.
+  // Poll while a run lasts.
   useEffect(() => {
-    if (running) {
-      wasRunning.current = true
-      const timer = setInterval(async () => {
-        try {
-          setRun(await getTestRun())
-        } catch (e) {
-          setError(e.message)
-        }
-      }, POLL_MS)
-      return () => clearInterval(timer)
-    }
-    if (wasRunning.current) {
-      wasRunning.current = false
-      refreshEvents()
-    }
+    if (!running) return
+    const timer = setInterval(async () => {
+      try {
+        setRun(await getTestRun())
+      } catch (e) {
+        setError(e.message)
+      }
+    }, POLL_MS)
+    return () => clearInterval(timer)
   }, [running])
+
+  // Each finished test is a turn in the log, so the log follows the run instead of waiting for its end.
+  const finished = Object.keys(run?.results ?? {}).length
+  const seen = useRef(finished)
+  useEffect(() => {
+    if (finished > seen.current) refreshEvents()
+    seen.current = finished
+  }, [finished])
 
   async function start(ids) {
     setError(null)
@@ -281,9 +285,9 @@ export default function Tests({ onOpenLogs }) {
                   <tr>
                     <th className={`${TH} w-10`} />
                     <th className={TH}>Test</th>
-                    <th className={`${TH} w-36`}>Role</th>
-                    <th className={`${TH} w-56`}>Expected</th>
-                    <th className={`${TH} w-56`}>Result</th>
+                    <th className={`${TH} w-32`}>Role</th>
+                    <th className={`${TH} w-48`}>Expected</th>
+                    <th className={`${TH} w-48`}>Result</th>
                     <th className={`${TH} w-20 text-right`}>Latency</th>
                     <th className={`${TH} w-14`} />
                   </tr>
