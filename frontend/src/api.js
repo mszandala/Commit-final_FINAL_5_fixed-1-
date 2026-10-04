@@ -39,10 +39,6 @@ export async function getEvents() {
     if (page.length < PAGE) return rows
   }
 }
-export const getComments = (conversationId) => request(`/conversations/${conversationId}/comments`)
-export const addComment = (conversationId, comment) =>
-  request(`/conversations/${conversationId}/comments`, { method: 'POST', body: comment })
-export const deleteComment = (id) => request(`/comments/${id}`, { method: 'DELETE' })
 // Live tests: scenarios from backend/live_tests/scenarios.json, run on the real model in the background.
 export const getTests = () => request('/tests')
 export const getTestRun = () => request('/tests/runs/current')
