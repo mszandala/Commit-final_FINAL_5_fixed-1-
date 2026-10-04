@@ -367,3 +367,27 @@ def test_diff_reports_leaf_changes_only():
 def test_build_policy_without_profiles_uses_base_values():
     policy = build_policy({"controls": {"prompt_guard": {"mode": "warn"}}})
     assert isinstance(policy, Policy) and policy.controls.prompt_guard.mode == "warn"
+
+
+# --- dozwolone modele ------------------------------------------------------------------------------
+
+def test_model_allow_list_matches_names_and_wildcards(store):
+    policy = store.get()
+    assert policy.is_model_allowed("google/gemma-4-26b-a4b-it")
+    assert not policy.is_model_allowed("openai/gpt-5")
+    store.set_override("models.allowed", ["google/gemma-*", "mistralai/mistral-small"])
+    policy = store.get()
+    assert policy.is_model_allowed("google/gemma-4-26b-a4b-it:free") and policy.is_model_allowed("mistralai/mistral-small")
+    assert not policy.is_model_allowed("google/palm") and not policy.is_model_allowed("mistralai/mistral-large")
+
+
+def test_model_control_can_be_switched_off_and_empty_list_means_no_limit(store):
+    store.set_override("models.enabled", False)
+    assert store.get().is_model_allowed("cokolwiek/model")
+    store.clear_overrides()
+    store.set_override("models.allowed", [])
+    assert store.get().is_model_allowed("cokolwiek/model")
+
+
+def test_sample_allowed_models_match_the_models_offered_in_the_ui(store):
+    assert store.get().models.allowed == [m["id"] for m in config.MODEL_PRESETS]

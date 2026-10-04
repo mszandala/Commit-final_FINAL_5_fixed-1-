@@ -92,9 +92,10 @@ class ToolGuard:
             return f"Tura kosztowała ${cost:.4f}; limit to ${self.cost_limit:.4f}"
         return None
 
-    def _deny(self, call: dict, name: str, args: dict, stage: str, reason: str) -> None:
+    def _deny(self, call: dict, name: str, args: dict, stage: str, reason: str, **extra) -> None:
         call.update(allowed=False, stage=stage, reason=reason)
-        audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage=stage, reason=reason)
+        audit.record("tool_call", "security", tool=name, allowed=False, args=args, stage=stage, reason=reason,
+                     **extra)
 
     def before(self, name: str, args: dict) -> ToolDecision:
         ctx, policy = self.ctx, self.ctx.policy
@@ -121,7 +122,8 @@ class ToolGuard:
         if name == "run_python" and policy.filter_on("code_guard"):
             verdict = check_code(str(args.get("code", "")))
             if verdict.is_blocked:
-                self._deny(call, name, args, "code_guard", verdict.reason)
+                self._deny(call, name, args, "code_guard", verdict.reason,
+                           attack_type=verdict.details.get("attack_type"))
                 return ToolDecision(False, call, f"Code rejected by security policy: {verdict.reason}")
 
         # Narzędzia działają lokalnie na prawdziwych wartościach. Wyjątek: subagent, którego

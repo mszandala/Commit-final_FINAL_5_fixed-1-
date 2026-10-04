@@ -4,7 +4,7 @@
 #
 #  * Plik jest przeładowywany na żywo: zapisz zmianę, a obowiązuje od następnego żądania
 #    (bez restartu). Błędny plik nie zatrzymuje serwera — obowiązuje ostatnia poprawna
-#    wersja, a błąd widać w statusie polityki (GET /api/v1/policy, gdy endpoint powstanie).
+#    wersja, a błąd widać w statusie polityki (GET /api/v1/policy).
 #  * Nieznane klucze są odrzucane (literówka nie może po cichu wyłączyć zabezpieczenia).
 #  * Usunięcie sekcji kontroli NIE wyłącza jej — wraca do wartości domyślnych (włączona).
 #    Kontrolę wyłącza się jawnie: `enabled: false`.
@@ -100,6 +100,19 @@ controls:
     model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
     threshold: 0.5
     trigger_threshold: 0.35
+
+# -------------------------------------------------------------------------------------
+#  Dozwolone modele LLM
+#  Zapytanie do modelu spoza listy jest blokowane przed jakimkolwiek wywołaniem (etap: Model policy).
+#  Wpisy to nazwy albo wzorce z `*`, np. "google/gemma-*". Pusta lista albo `enabled: false`
+#  oznacza brak ograniczeń.
+# -------------------------------------------------------------------------------------
+models:
+  enabled: true
+  allowed:
+    - google/gemma-4-26b-a4b-it
+    - google/gemma-4-26b-a4b-it:free
+    - gemma4:12b
 
 # -------------------------------------------------------------------------------------
 #  Budżety i zasoby

@@ -41,6 +41,7 @@ from config import (
     MAX_TOOL_RESULT_CHARS,
     MAX_TURN_COST,
     MAX_TURN_TOKENS,
+    MODEL_PRESETS,
     PII_JUDGE_ENABLED,
     PUBLIC_SOURCE_TOOLS,
     REFUSAL_DETECTION_ENABLED,
@@ -103,6 +104,8 @@ def current_policy() -> Policy:
                     "threshold": SETTINGS.pii_threshold},
             "refusal_detection": {"enabled": REFUSAL_DETECTION_ENABLED, "judge_enabled": REFUSAL_JUDGE_ENABLED},
         },
+        # Modele z listy w interfejsie i model wdrożenia (z .env), nawet jeśli nie ma go na liście.
+        "models": {"enabled": True, "allowed": [*(m["id"] for m in MODEL_PRESETS), config.MODEL]},
         "budgets": {
             "per_turn": {"max_tokens": MAX_TURN_TOKENS, "max_cost_usd": MAX_TURN_COST,
                          "max_tool_steps": config.MAX_TOOL_STEPS, "max_tool_result_chars": MAX_TOOL_RESULT_CHARS},
@@ -353,7 +356,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
                           verdicts=verdicts, masked_for_model=masked)
 
     # 0-3. Zapytanie: długość, strażnik i intencja, regulaminy, maskowanie (core.check_request)
-    request = check_request(ctx, user_message, baseline_filters=DEFAULT_FILTERS,
+    request = check_request(ctx, user_message, baseline_filters=DEFAULT_FILTERS, model=SETTINGS.model,
                             on_stage=lambda: stage(STAGE_REQUEST))
     guard, flagged, guard_reason = request.guard, request.flagged, request.guard_reason
     masked_prompt, entities = request.masked_prompt, request.entities

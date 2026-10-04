@@ -244,6 +244,54 @@ class Stats(ApiModel):
     avg_latency_ms: int
 
 
+class Metrics(ApiModel):
+    total: int = Field(description="Liczba tur w oknie")
+    window: dict[str, Optional[datetime]] = Field(description="Czas pierwszej i ostatniej tury: from, to")
+    by_decision: dict[str, int]
+    by_control: dict[str, int] = Field(description="Które kontrole zdecydowały (nazwy jak w GET /meta -> controls)")
+    by_role: dict[str, int]
+    by_level: dict[str, int]
+    blocked_rate: float = Field(description="Udział tur zablokowanych (0-1)")
+    intervention_rate: float = Field(description="Udział tur, w których warstwa coś zrobiła: blokada, ukrycie, odmowa, ostrzeżenie")
+    tokens: int = Field(description="Tokeny strefy chatbota (to, co liczy się do budżetu)")
+    cost_usd: float
+    security_tokens: int = Field(description="Tokeny strażników i sędziów (nie obciążają budżetu użytkownika)")
+    security_cost_usd: float
+    latency_ms: dict[str, int] = Field(description="Czas całej tury: avg, p50, p95, p99, max")
+    step_timings_ms: dict[str, dict[str, int]] = Field(
+        description="Czas każdego rodzaju kroku (kontroli): count, avg, p50, p95, p99, max; nazwy w GET /meta -> stepKinds")
+    zone_avg_ms: dict[str, int] = Field(description="Średni czas na turę w strefach: security, chatbot, local")
+    blocked_by_step: dict[str, int] = Field(description="Ile razy dany krok zablokował")
+    warned_by_step: dict[str, int] = Field(description="Ile razy dany krok ostrzegł albo ukrył dane")
+    by_attack_type: dict[str, int] = Field(description="Wykryte ataki po typie (Prompt_Injection, Sandbox_Escape, ...)")
+
+
+class PolicyChange(ApiModel):
+    path: str = Field(description="Klucz w pliku polityki, np. controls.prompt_guard.mode")
+    old: Any = None
+    new: Any = None
+
+
+class PolicyProblem(ApiModel):
+    message: str
+    problems: list[str] = Field(description="Po jednym opisie na błąd, ze ścieżką klucza")
+    at: float = Field(description="Czas błędu (sekundy od epoki)")
+
+
+class PolicyStatus(ApiModel):
+    path: str = Field(description="Plik polityki")
+    version: int = Field(description="Rośnie przy każdej zmianie treści polityki (od 1 przy starcie)")
+    digest: str = Field(description="Skrót obowiązującej polityki; ten sam skrót = ta sama polityka")
+    profile: str = Field(description="Aktywny profil ścisłości")
+    profiles: list[str] = Field(description="Profile zdefiniowane w pliku")
+    loaded_at: Optional[float] = Field(description="Kiedy wczytano obowiązującą wersję (sekundy od epoki)")
+    overridden: list[str] = Field(description="Klucze nadpisane z interfejsu (wygrywają z plikiem i profilem)")
+    last_changes: list[PolicyChange] = Field(description="Co zmieniło ostatnie przeładowanie")
+    error: Optional[PolicyProblem] = Field(description="Błąd ostatniej próby przeładowania; wtedy obowiązuje "
+                                                      "poprzednia poprawna wersja. null = plik jest poprawny")
+    policy: Optional[dict[str, Any]] = Field(None, description="Cała obowiązująca polityka; tylko przy ?full=true")
+
+
 class Health(ApiModel):
     status: str = Field(description='"ok" albo "degraded", gdy konfiguracja nie pozwala wołać modelu')
     provider: str

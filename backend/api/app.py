@@ -9,14 +9,17 @@ import queue
 import threading
 from collections import Counter
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 import pipeline
+from api import metrics as metrics_mod
 from api import schemas, state
+from core import PolicyError, get_store
 from api.steps import LEVELS, STEP_KINDS, ZONES
 from audit import store
 from config import (
@@ -186,6 +189,21 @@ def reset_budget(role_id: Optional[str] = Query(None, alias="roleId")):
     return roles()
 
 
+@router.get("/policy", response_model=schemas.PolicyStatus, tags=["config"],
+            summary="Stan pliku polityki: wersja, skrót, aktywny profil, nadpisania, ostatnie zmiany i błąd pliku",
+            description="Plik polityki jest przeładowywany na żywo; ten endpoint pokazuje, co obowiązuje i czy ostatnia "
+                        "zmiana pliku została przyjęta. Uwaga: demo czyta jeszcze ustawienia z config.py i panelu "
+                        "konfiguracji; polityka z pliku steruje na razie etapami z pakietu `core` (proxy).")
+def get_policy(full: bool = Query(False, description="Dołącz całą obowiązującą politykę")):
+    try:
+        store = get_store()
+        status = store.status()
+        status["policy"] = store.get().model_dump(mode="json") if full else None
+    except PolicyError as exc:
+        raise HTTPException(503, f"Plik polityki jest niepoprawny: {exc}") from None
+    return status
+
+
 @router.get("/config", response_model=schemas.Config, tags=["config"])
 def get_config():
     return _config()
@@ -340,6 +358,31 @@ def stats():
         tokens=sum(e["tokens"] for e in rows),
         avg_latency_ms=int(sum(e["latency_ms"] for e in rows) / len(rows)) if rows else 0,
     )
+
+
+def _window(since_minutes: Optional[int]) -> list[dict]:
+    rows = state.list_events(limit=10**9)
+    since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes) if since_minutes else None
+    return metrics_mod.filter_since(rows, since)
+
+
+@router.get("/metrics", response_model=schemas.Metrics, tags=["logs"],
+            summary="Metryki dla zarządu i zespołu bezpieczeństwa: blokady, koszty, opóźnienia całych tur i każdej kontroli")
+def metrics(since_minutes: Optional[int] = Query(None, alias="sinceMinutes", ge=1,
+                                                 description="Tylko tury z ostatnich N minut; bez tego cały log")):
+    return metrics_mod.compute_metrics(_window(since_minutes))
+
+
+@router.get("/audit/export", tags=["logs"], response_class=Response,
+            summary="Eksport logu audytu do analizy: JSONL (pełny ślad tur) albo CSV (jeden wiersz na turę)",
+            responses={200: {"content": {"application/x-ndjson": {}, "text/csv": {}}}})
+def audit_export(fmt: Literal["jsonl", "csv"] = Query("jsonl", alias="format"),
+                 since_minutes: Optional[int] = Query(None, alias="sinceMinutes", ge=1)):
+    rows = _window(since_minutes)
+    headers = {"Content-Disposition": f'attachment; filename="audit.{fmt}"'}
+    if fmt == "csv":
+        return Response(metrics_mod.export_csv(rows), media_type="text/csv; charset=utf-8", headers=headers)
+    return StreamingResponse(metrics_mod.export_jsonl(rows), media_type="application/x-ndjson", headers=headers)
 
 
 def _warm_up() -> None:

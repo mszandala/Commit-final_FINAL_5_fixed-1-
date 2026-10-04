@@ -252,3 +252,28 @@ def test_demo_adapter_builds_the_same_policy_as_the_sample_file(store):
     for name in set(live.tools) | set(sample.tools) | {"run_python", "nieznane"}:
         assert live.tool(name) == sample.tool(name), name
     assert live.tool_defaults == sample.tool_defaults
+
+
+# --- dozwolone modele -------------------------------------------------------------------------------
+
+def test_model_outside_the_allow_list_stops_the_turn_before_any_check(store):
+    ctx = ctx_for(store)
+    decision = check_request(ctx, f"Wyślij raport na {EMAIL}", model="openai/gpt-5")
+    assert decision.blocked and decision.verdict["stage"] == "model_policy"
+    assert decision.guard is None and "openai/gpt-5" in decision.reply
+    assert EMAIL not in decision.masked_prompt          # wersja do logu bez surowych wartości
+    assert ctx.conv.user_texts == []                    # niczego nie zapamiętano
+
+
+def test_allowed_model_wildcards_and_missing_model_pass(store):
+    assert not check_request(ctx_for(store), "Cześć", model="google/gemma-4-26b-a4b-it").blocked
+    assert not check_request(ctx_for(store), "Cześć").blocked           # model nieznany wywołującemu: bez sprawdzenia
+    store.set_override("models.allowed", ["google/gemma-*"])
+    assert not check_request(ctx_for(store), "Cześć", model="google/gemma-4-26b-a4b-it:free").blocked
+    assert check_request(ctx_for(store), "Cześć", model="meta/llama").blocked
+
+
+def test_editing_the_allow_list_in_the_file_applies_live(store, policy_file):
+    assert check_request(ctx_for(store), "Cześć", model="meta/llama").blocked
+    edit(policy_file, lambda d: d["models"]["allowed"].append("meta/llama"))
+    assert not check_request(ctx_for(store), "Cześć", model="meta/llama").blocked

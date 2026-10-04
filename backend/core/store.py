@@ -165,6 +165,27 @@ def policy_digest(policy: Policy) -> str:
 
 # --- magazyn ---------------------------------------------------------------------------------------
 
+_default_store: Optional["PolicyStore"] = None
+_default_lock = threading.Lock()
+
+
+def get_store() -> "PolicyStore":
+    """Wspólny magazyn polityki procesu (plik z POLICY_FILE albo policy/policy.yaml), tworzony przy
+    pierwszym użyciu. Niepoprawny plik daje `PolicyError` przy każdej próbie, aż do poprawienia."""
+    global _default_store
+    with _default_lock:
+        if _default_store is None:
+            _default_store = PolicyStore()
+        return _default_store
+
+
+def reset_default_store() -> None:
+    """Zapomina wspólny magazyn (testy, zmiana POLICY_FILE w trakcie działania procesu)."""
+    global _default_store
+    with _default_lock:
+        _default_store = None
+
+
 def default_policy_path() -> Path:
     return Path(os.getenv("POLICY_FILE") or Path(__file__).resolve().parents[2] / "policy" / "policy.yaml")
 

@@ -125,6 +125,7 @@ CONTROLS = {
     "company_policies": "Company policy",
     "chatbot_refusal": "Chatbot refusal",
     "budget":         "Budget",
+    "model_policy":   "Model policy",
 }
 
 BASE_DIR       = Path(__file__).parent / "data"

@@ -6,6 +6,7 @@ domyślnymi (wyłącza się wyłącznie jawnie: `enabled: false`). Role, narzęd
 wartości domyślnych: opisuje je plik. Nieznane klucze są odrzucane, żeby literówka w pliku nie
 kończyła się cichym brakiem zabezpieczenia.
 """
+from fnmatch import fnmatchcase
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -79,6 +80,18 @@ class Controls(_Model):
     refusal_detection: RefusalDetection = RefusalDetection()
 
 
+# --- modele -----------------------------------------------------------------------------------
+
+class ModelsPolicy(_Model):
+    """Dozwolone modele LLM. Wpisy to nazwy albo wzorce z `*` (np. `google/gemma-*`).
+
+    Pusta lista oznacza brak ograniczeń (nie ma jak wybrać bezpiecznej listy za wdrożenie);
+    kontrolę wyłącza też jawne `enabled: false`.
+    """
+    enabled: bool = True
+    allowed: list[str] = []
+
+
 # --- budżety ----------------------------------------------------------------------------------
 
 class PerTurn(_Model):
@@ -142,6 +155,7 @@ class Policy(_Model):
     profile: str = "balanced"
     profile_names: tuple[str, ...] = ()
     controls: Controls = Controls()
+    models: ModelsPolicy = ModelsPolicy()
     budgets: Budgets = Budgets()
     pii: PiiSection = PiiSection()
     tool_defaults: ToolDefaults = ToolDefaults()
@@ -166,6 +180,12 @@ class Policy(_Model):
 
     def filters(self) -> dict[str, bool]:
         return {name: self.filter_on(name) for name in FILTER_IDS}
+
+    def is_model_allowed(self, model: str) -> bool:
+        """Czy model wolno wywołać; bez listy dozwolonych (albo przy wyłączonej kontroli) każdy."""
+        if not self.models.enabled or not self.models.allowed:
+            return True
+        return any(fnmatchcase(model, pattern) for pattern in self.models.allowed)
 
     def role(self, name: str) -> Optional[Role]:
         return self.roles.get(name)

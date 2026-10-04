@@ -27,6 +27,7 @@ STEP_KINDS = {
     "refusal":        "Chatbot refusal",
     "retry":          "Retry",
     "budget":         "Budget",
+    "model_policy":   "Model policy",
     "error":          "Error",
 }
 
@@ -189,6 +190,7 @@ _DESCRIBE = {
     "refusal": _refusal,
     "retry": lambda e: ("warn", f"The model's reply was discarded and requested again: {e.get('reason')}"),
     "budget": lambda e: ("block", e.get("reason") or "Budget exhausted"),
+    "model_policy": lambda e: ("block", f"Model {e.get('model')} is not on the list of allowed models"),
     "error": lambda e: ("block", f"Model call failed: {e.get('error')}"),
 }
 

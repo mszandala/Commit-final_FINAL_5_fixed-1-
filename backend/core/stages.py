@@ -64,8 +64,8 @@ class RequestDecision:
 
 
 def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Optional[dict] = None,
-                  on_stage: Optional[Callable[[], None]] = None) -> RequestDecision:
-    """Długość promptu -> strażnik i klasyfikator intencji -> regulaminy -> maskowanie.
+                  model: Optional[str] = None, on_stage: Optional[Callable[[], None]] = None) -> RequestDecision:
+    """Model -> długość promptu -> strażnik i klasyfikator intencji -> regulaminy -> maskowanie.
 
     `baseline_filters` to ustawienia wdrożenia: tylko kontrole wyłączone względem nich trafiają do
     logu jako niespodzianka. `on_stage` jest wołane, gdy zaczyna się właściwe sprawdzanie zapytania.
@@ -76,6 +76,13 @@ def check_request(ctx: TurnContext, user_message: str, *, baseline_filters: Opti
     off = sorted(name for name, on in policy.filters().items() if not on and baseline.get(name, True))
     if off:
         audit.record("filters_off", "security", filters=off)
+
+    # Model spoza listy dozwolonych: tura nie rusza, zanim cokolwiek zobaczy jakikolwiek model.
+    if model is not None and not policy.is_model_allowed(model):
+        reason = f"Model „{model}” nie jest dozwolony przez politykę"
+        audit.record("model_policy", "security", model=model, allowed=False)
+        return RequestDecision(True, f"Zapytanie zostało zablokowane: {reason}", block("model_policy", reason),
+                               logged_prompt(ctx, user_message))
 
     # 0. Długość promptu: zbyt długi nie trafia do żadnego modelu, także do strażników.
     max_chars = policy.controls.prompt_length.max_chars
