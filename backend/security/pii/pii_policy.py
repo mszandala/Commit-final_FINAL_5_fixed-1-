@@ -4,22 +4,20 @@ from security.common.verdicts import Verdict
 
 
 def redact(text: str, entities: list[dict]) -> str:
-    """Zastępuje fragmenty encji znacznikiem [TYP]."""
+    """Replaces entity spans with [TYPE] tags."""
     return replace_spans(text, [(e["start"], e["end"], f"[{e['type']}]") for e in entities])
 
 
 def check_pii(role: str, text: str, entities: list[dict]) -> Verdict:
-    """Deterministyczna decyzja o encjach z detect_pii dla danej roli.
+    """Deterministic PII policy verdict on entities from detect_pii for a given role.
 
-    Kolejność: globalna blokada > typy spoza allowed_pii roli (blokada, do oceny przez
-    pii_access_judge) > globalne maskowanie > przepuszczenie.
+    Precedence order: global block > role denied types (block) > global redact > pass.
     """
-    # Konfiguracja czytana przy każdym wywołaniu: zmiana ROLES działa bez restartu.
+    # Configuration read on each invocation: ROLES changes take effect without restart.
     allowed = set(ROLES.get(role, {}).get("allowed_pii", []))
     always_blocked, always_masked = set(GLOBAL_BLOCKED_PII), set(GLOBAL_REDACTED_PII)
     blocked = [e for e in entities if e["type"] in always_blocked]
     masked = [e for e in entities if e["type"] in always_masked]
-    # Typ zamiast porównywania słowników encji (`e not in blocked`), które było O(n²).
     denied = [e for e in entities
               if e["type"] not in allowed and e["type"] not in always_blocked and e["type"] not in always_masked]
 

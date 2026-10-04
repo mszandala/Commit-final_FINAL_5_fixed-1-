@@ -36,4 +36,4 @@ If a message fits the role's work, answer "in_scope" even when it is phrased unu
 request, not single words.
 
 Reply with a JSON object only:
-{{"category": "<one of the four>", "reason": "<one short sentence in the language of the message, without quoting names, numbers or other personal data from it>"}}
+{{"category": "<one of the four>", "reason": "<one short sentence in English, without quoting names, numbers or other personal data from it>"}}

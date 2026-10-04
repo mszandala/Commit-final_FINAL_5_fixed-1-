@@ -12,12 +12,11 @@ def _run_registered_tool(name: str, args: dict) -> str:
 
 
 class PolicyToolGate:
-    """Bramka dla `agent.run_agent(tool_gate=...)`: agent działa wyłącznie z uprawnieniami roli użytkownika.
+    """Gateway for `agent.run_agent(tool_gate=...)`: agent acts strictly within user role permissions.
 
-    Kolejność: istniejąca bramka (np. security.tool_whitelist.ToolGate) → polityka dla argumentów
-    narzędzia → wykonanie narzędzia → filtr wyniku, ZANIM trafi do kontekstu modelu.
-    Agent używa tekstu zwróconego przez bramkę zamiast wyniku narzędzia, więc przefiltrowany
-    wynik trafia do modelu bez zmian w agent.py.
+    Execution order: existing gate (e.g. security.tool_whitelist.ToolGate) -> company policy on tool
+    arguments -> tool execution -> output filtering BEFORE reaching the model's context.
+    The agent receives the filtered output returned by the gate, preventing confidential data leaks.
     """
 
     def __init__(self, engine: CompanyPolicyEngine, role: str, inner: Optional[Callable] = None,

@@ -1,6 +1,7 @@
-# Executor kodu Pythona (narzędzie run_python): osobny kontener bez sieci i bez danych, z limitami zasobów.
-# Zawiera tylko to, co jest potrzebne do kontroli i wykonania kodu: żadnych bibliotek, modeli ani danych.
+# Python code executor (run_python tool): isolated container without network or data, with resource limits.
+# Contains only what is needed for code inspection and execution: no extra libraries, models, or data.
 FROM python:3.12-slim
+
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app

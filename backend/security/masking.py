@@ -20,12 +20,12 @@ from config import (
 
 _PSEUDONYM_KEY = (PSEUDONYM_KEY or secrets.token_hex(16)).encode()
 
-# Krótkich wartości nie szukamy "na ślepo" w tekście — "5" czy "1102" trafiałyby wszędzie.
+# Short values are not searched blindly across text - "5" or "1102" would trigger false positives.
 MIN_KNOWN_VALUE_LEN = 6
 
 REDACTED_CELL = "[REDACTED]"
 
-# Znacznik w nawiasach dowolnego rodzaju, z tolerancją na to, co model potrafi z nim zrobić:
+# Bracketed token in various formats, robust to model transformations:
 # <EMAIL_1>, <email 1>, [EMAIL-1], &lt;EMAIL_1&gt;, <PHONE-NO_2>.
 _TOKEN_RE = re.compile(
     r"(?:<|&lt;|\[|\()\s*([A-Za-z][A-Za-z_\- ]*?)[\s_\-]*(\d+)\s*(?:>|&gt;|\]|\))"
@@ -34,7 +34,7 @@ _PSEUDONYM_RE = re.compile(r"\b(?:ID|id|Id)[-_]([0-9a-fA-F]{10})\b")
 
 
 def label_for(entity_type: str) -> str:
-    """Etykieta w miejscu ukrytej wartości — ten sam format co pii_policy.redact: [TYP]."""
+    """Label for redacted value - same format as pii_policy.redact: [TYPE]."""
     return f"[{entity_type}]"
 
 
@@ -42,13 +42,13 @@ _SEVERITY = ["allow", "pseudonymize", "redact", "block"]
 
 
 def role_policy(role: str) -> dict:
-    """Polityka kanału użytkownika dla roli: typ -> allow / redact / block / pseudonymize."""
+    """User channel policy for role: type -> allow / redact / block / pseudonymize."""
     cfg = ROLES.get(role, {})
     policy = dict(DEFAULT_ROLE_PII_POLICY)
     for entity_type in cfg.get("allowed_pii", []):
         policy[entity_type] = "allow"
     policy.update(cfg.get("pii_policy", {}))
-    # Reguły globalne obowiązują każdą rolę; nadpisanie roli może je tylko zaostrzyć.
+    # Global rules apply to every role; role override can only tighten them.
     for entity_types, action in ((GLOBAL_REDACTED_PII, "redact"), (GLOBAL_BLOCKED_PII, "block")):
         for entity_type in entity_types:
             current = policy.get(entity_type, "allow")
@@ -57,7 +57,7 @@ def role_policy(role: str) -> dict:
 
 
 def chatbot_action(entity_type: str) -> str:
-    """Co zrobić z typem w kanale chatbota; nieznany typ maskujemy."""
+    """Action for entity type in chatbot channel; unknown types are masked by default."""
     return CHATBOT_PII_POLICY.get(entity_type, "redact")
 
 
@@ -66,18 +66,18 @@ def _slug(text: str) -> str:
 
 
 class Vault:
-    """Sejf podstawień jednej rozmowy: wartość wrażliwa <-> znacznik widoczny dla chatbota.
+    """Substitution vault for a conversation turn: sensitive value <-> token visible to chatbot.
 
-    Zwykłe typy dostają kolejne znaczniki (<EMAIL_1>), identyfikatory — stały pseudonim HMAC
-    (ID-3fa9c21b07), taki sam w każdej rozmowie, żeby dało się po nim grupować i liczyć.
+    Standard types receive sequential tokens (<EMAIL_1>), identifiers receive a stable HMAC pseudonym
+    (ID-3fa9c21b07), identical across conversations to enable grouping and joins.
     """
 
     def __init__(self, id_types: Optional[Iterable[str]] = None):
-        # Typy zamieniane na stałe pseudonimy. None = lista z config.py (tryb zgodności); warstwa ustawia
-        # tu typy z polityki, więc zmiana polityki działa od następnego użycia sejfu.
+        # Types converted into stable pseudonyms. None = fallback to config.py list;
+        # policy overrides apply from the next vault instantiation.
         self.id_types: Optional[tuple[str, ...]] = tuple(id_types) if id_types is not None else None
-        self._by_key: dict[str, tuple[str, str, str]] = {}   # klucz znacznika -> (znacznik, typ, wartość)
-        self._by_value: dict[tuple[str, str], str] = {}      # (typ, wartość) -> znacznik
+        self._by_key: dict[str, tuple[str, str, str]] = {}   # token key -> (token, type, value)
+        self._by_value: dict[tuple[str, str], str] = {}      # (type, value) -> token
         self._counters: dict[str, int] = {}
 
     def __len__(self) -> int:
@@ -107,18 +107,18 @@ class Vault:
         return list(self._by_key.values())
 
     def raw_values(self) -> list[str]:
-        """Wartości na tyle długie, że da się ich wiarygodnie szukać w tekście."""
+        """Values long enough to be searched reliably in text."""
         return [v for _, t, v in self._by_key.values() if len(v) >= MIN_KNOWN_VALUE_LEN and not self.is_id_type(t)]
 
     def mask_entities(self, text: str, entities: list[dict]) -> str:
-        """Zamienia wskazane encje ({"type","start","end"}) na znaczniki."""
+        """Substitutes specified entities ({"type","start","end"}) with tokens."""
         out = text
         for e in sorted(entities, key=lambda e: e["start"], reverse=True):
             out = out[: e["start"]] + self.token_for(e["type"], text[e["start"]:e["end"]]) + out[e["end"]:]
         return out
 
     def mask_known(self, text: str) -> str:
-        """Maskuje wartości, które już są w sejfie, gdziekolwiek pojawią się ponownie."""
+        """Masks values that are already in the vault whenever they appear again."""
         for token, entity_type, value in sorted(self._by_key.values(), key=lambda x: -len(x[2])):
             if len(value) >= MIN_KNOWN_VALUE_LEN and not self.is_id_type(entity_type) and value in text:
                 text = text.replace(value, token)
@@ -132,23 +132,23 @@ class Vault:
         for pattern, pseudonym in ((_TOKEN_RE, False), (_PSEUDONYM_RE, True)):
             def repl(match, pseudonym=pseudonym):
                 entry = self._resolve(match, pseudonym)
-                # Nieznany znacznik zostaje w tekście bez zmian — nigdy nie zgadujemy wartości.
+                # Unknown tokens remain unmodified - we never guess sensitive values.
                 return match.group(0) if entry is None else replace(entry, match.group(0))
             text = pattern.sub(repl, text)
         return text
 
     def unmask(self, text: str) -> str:
-        """Podstawia prawdziwe wartości za wszystkie znaczniki (argumenty narzędzi lokalnych)."""
+        """Substitutes original values back for all tokens (for local tool arguments)."""
         return self._substitute(text, lambda entry, found: entry[2])
 
     def unmask_args(self, args: dict) -> dict:
         return {k: self.unmask(v) if isinstance(v, str) else v for k, v in args.items()}
 
     def render(self, text: str, policy: dict, own_text: str = "") -> tuple[str, dict]:
-        """Wersja dla użytkownika: znacznik -> wartość, etykieta albo pseudonim, wg polityki roli.
+        """User channel view: token -> value, label, or pseudonym based on role policy.
 
-        Wartości, które użytkownik sam wpisał (`own_text`), wracają do niego niezależnie od polityki.
-        Zwraca (tekst, statystyki), gdzie statystyki to {"restored", "redacted", "blocked": [typy]}.
+        Values that the user provided in their own input (`own_text`) are returned unmasked.
+        Returns (text, stats) where stats is {"restored", "redacted", "blocked": [types]}.
         """
         stats = {"restored": [], "redacted": [], "blocked": []}
 
@@ -170,10 +170,10 @@ class Vault:
 
 
 def mask_csv(text: str, column_types: dict, policy: dict, vault: Vault) -> tuple[str, dict]:
-    """Stosuje politykę kolumn do wyniku narzędzia CSV (pierwsza linia to nagłówek).
+    """Applies column policy to CSV tool result (first row is header).
 
-    Identyfikatory zawsze wychodzą jako pseudonimy — rola z "allow" odzyska je w odpowiedzi.
-    Pozostałe kolumny: "allow" zostaje bez zmian, każde inne działanie usuwa wartość.
+    Identifiers are always converted into pseudonyms - a role with 'allow' unmasks them in the reply.
+    Other columns: 'allow' leaves content unchanged; any other action removes the cell value.
     """
     lines = text.split("\n")
     header = next(csv.reader([lines[0]]), [])
@@ -196,7 +196,7 @@ def mask_csv(text: str, column_types: dict, policy: dict, vault: Vault) -> tuple
         row = next(csv.reader([line]), [])
         if len(row) != len(header):
             if line:
-                trailer.append(line)    # np. "(no matching rows)" albo "[truncated: ...]"
+                trailer.append(line)    # e.g. "(no matching rows)" or "[truncated: ...]"
             continue
         for i, (action, entity_type) in actions.items():
             if action == "token":
@@ -218,7 +218,7 @@ _TRACEBACK_RE = re.compile(r"Traceback \(most recent call last\):.*?(?=\n\S|\Z)"
 
 
 def sanitize_paths(text: str) -> str:
-    """Usuwa z wyniku narzędzia ścieżki systemowe i stack trace'y."""
+    """Removes system paths and stack traces from tool output."""
     text = _TRACEBACK_RE.sub("[stack trace removed]", text)
     for root in _PROJECT_ROOTS:
         for variant in (root, root.replace("\\", "/"), root.replace("\\", "\\\\")):

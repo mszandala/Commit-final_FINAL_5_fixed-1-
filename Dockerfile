@@ -1,11 +1,10 @@
-# Backend: API aplikacji demo, panel, metryki i proxy zgodne z OpenAI w jednym procesie (python main.py).
+# Backend: Demo app API, dashboard, metrics, and OpenAI-compatible proxy in a single process (python main.py).
 #
-# Układ katalogów odtwarza repozytorium (/repo/backend, /repo/policy), bo kod i testy liczą ścieżki
-# względem niego. Modele PII i wykrywania odmów są wbudowane w obraz, więc kontener działa bez internetu
-# (poza wywołaniami modelu językowego).
+# Directory layout mirrors repo (/repo/backend, /repo/policy) for relative path resolution.
+# PII and refusal models are pre-downloaded in the image for offline readiness.
 FROM python:3.12-slim
 
-# Wersja CPU biblioteki torch: domyślne koło dla Linuksa ciągnie GPU i kilka GB bibliotek CUDA.
+# CPU version of PyTorch to avoid heavy CUDA runtime dependencies
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 ARG PII_MODEL=urchade/gliner_small-v2.1
 ARG REFUSAL_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
@@ -17,24 +16,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PII_MODEL=${PII_MODEL} \
     REFUSAL_MODEL=${REFUSAL_MODEL}
 
-# Zależności. Pomijamy chromadb, kubernetes i onnxruntime: używa ich tylko narzędzie RAG
-# (tools/rag.py), którego aplikacja nie ładuje, a razem ważą setki MB.
+# Dependencies
 COPY requirements.txt /tmp/requirements.txt
-RUN grep -vE '^(chromadb|kubernetes|onnxruntime)==' /tmp/requirements.txt > /tmp/app-requirements.txt \
- && pip install --index-url "${TORCH_INDEX}" "$(grep -E '^torch==' /tmp/app-requirements.txt)" \
- && pip install -r /tmp/app-requirements.txt
+RUN pip install --index-url "${TORCH_INDEX}" "$(grep -E '^torch==' /tmp/requirements.txt)" \
+ && pip install -r /tmp/requirements.txt
 
-# Modele do obrazu (osobna warstwa: nie przebudowuje się przy zmianie kodu).
+
+# Models baked into image (separate layer: doesn't rebuild on code changes).
 RUN python -c "import os; \
 from gliner import GLiNER; GLiNER.from_pretrained(os.environ['PII_MODEL']); \
 from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['REFUSAL_MODEL']); \
 from huggingface_hub import snapshot_download; snapshot_download(os.environ['REFUSAL_MODEL'], allow_patterns=['tokenizer.json'])"
 
-# Użytkownik bez uprawnień roota; /state na log audytu, bazy i nadpisania polityki (wolumen).
+# Non-root user; /state for audit logs, databases and policy overrides (volume).
 RUN useradd --system --uid 10001 --home-dir /nonexistent --no-create-home app \
  && install -d -o 10001 -g 10001 /state \
  && install -d -o 10001 -g 10001 -m 0700 /run/executor \
  && chown -R 10001:10001 /models
+
 
 COPY --chown=10001:10001 backend/ /repo/backend/
 COPY --chown=10001:10001 policy/ /repo/policy/
