@@ -3,6 +3,7 @@ import { Gauge } from 'lucide-react'
 import { endConversation, resetBudget, streamChat } from '../api'
 import { refreshEvents } from '../events'
 import { useMeta } from '../meta'
+import { composeMessage, useAttachments } from './attachments'
 import ChatItem from './ChatItem'
 import Composer from './Composer'
 import Examples from './Examples'
@@ -31,6 +32,9 @@ export default function Chat({ people }) {
   const [failed, setFailed] = useState(null)
   const [budgets, setBudgets] = useState(() => Object.fromEntries(people.map((p) => [p.id, p.budget])))
   const listRef = useRef(null)
+  const attachments = useAttachments()
+  // dragenter and dragleave fire for every child crossed, so the count says whether a file is over the chat.
+  const [dragDepth, setDragDepth] = useState(0)
 
   const person = people.find((p) => p.id === roleId)
   const account = budgets[roleId]
@@ -39,6 +43,17 @@ export default function Chat({ people }) {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [items, pending, failed])
+
+  // A file dropped outside the chat would make the browser open it and leave the app.
+  useEffect(() => {
+    const stop = (e) => e.dataTransfer.types.includes('Files') && e.preventDefault()
+    window.addEventListener('dragover', stop)
+    window.addEventListener('drop', stop)
+    return () => {
+      window.removeEventListener('dragover', stop)
+      window.removeEventListener('drop', stop)
+    }
+  }, [])
 
   function switchUser(next) {
     if (conversation.current) endConversation(conversation.current).catch(() => {})
@@ -72,13 +87,22 @@ export default function Chat({ people }) {
     }
   }
 
+  // `files` are attachments already read to text; they go to the backend inside the message.
   function submit(text, files = []) {
-    const attached = files.map(({ name, size }) => ({ name, size }))
-    const added = [{ id: nextId++, kind: 'user', text, files: attached }]
+    const added = [{ id: nextId++, kind: 'user', text, files: files.map(({ name }) => ({ name })) }]
     if (!sessionStarted) added.unshift({ id: nextId++, kind: 'session', name: person.user, role: person.label })
     setSessionStarted(true)
     setItems((prev) => [...prev, ...added])
-    send(text)
+    send(composeMessage(text, files))
+  }
+
+  const isFileDrag = (e) => e.dataTransfer.types.includes('Files')
+
+  function drop(e) {
+    if (!isFileDrag(e)) return
+    e.preventDefault()
+    setDragDepth(0)
+    if (!pending) attachments.add(e.dataTransfer.files)
   }
 
   // Zeroes token and spending usage for one role, or for everyone when `id` is null.
@@ -92,7 +116,13 @@ export default function Chat({ people }) {
   }
 
   return (
-    <section className="flex h-full flex-col bg-white">
+    <section
+      className="flex h-full flex-col bg-white"
+      onDragEnter={(e) => isFileDrag(e) && setDragDepth((n) => n + 1)}
+      onDragLeave={(e) => isFileDrag(e) && setDragDepth((n) => Math.max(0, n - 1))}
+      onDragOver={(e) => isFileDrag(e) && e.preventDefault()}
+      onDrop={drop}
+    >
       <header className="flex h-14 shrink-0 items-center border-b border-line px-5">
         <UserMenu
           people={people}
@@ -104,7 +134,8 @@ export default function Chat({ people }) {
         />
       </header>
 
-      <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
+      {/* `wrap-break-word` is inherited, so a long unbroken word wraps in every message instead of overflowing. */}
+      <div ref={listRef} className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5 wrap-break-word">
         {items.map((item) => (
           <ChatItem key={item.id} item={item} />
         ))}
@@ -120,7 +151,7 @@ export default function Chat({ people }) {
             {BUDGET_NOTICE[kind](share)}
           </p>
         )}
-        <Composer disabled={!!pending} onSend={submit} />
+        <Composer disabled={!!pending} onSend={submit} attachments={attachments} dragging={dragDepth > 0 && !pending} />
       </footer>
     </section>
   )
