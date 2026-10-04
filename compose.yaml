@@ -42,6 +42,8 @@ services:
       - path: backend/.env
         required: false
     environment:
+      API_HOST: 0.0.0.0                       # wygrywa z API_HOST=127.0.0.1 z backend/.env (inaczej port jest nieosiągalny)
+      API_PORT: "8000"
       HF_HUB_OFFLINE: "1"                     # modele PII i odmów są w obrazie
       PYTHON_EXECUTOR_SOCKET: /run/executor/executor.sock   # run_python wykonuje osobny kontener
       CORS_ORIGINS: "http://127.0.0.1:${UI_PORT:-8080},http://localhost:${UI_PORT:-8080}"
