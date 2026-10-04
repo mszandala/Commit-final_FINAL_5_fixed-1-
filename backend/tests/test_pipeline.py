@@ -618,3 +618,18 @@ def test_raw_id_known_to_the_vault_is_pseudonymized_for_the_analyst():
     assert pipeline.filter_output("analityk", text, vault)[0] == f"| {token} | 619 |"
     assert pipeline.filter_output("bankier", text, vault)[0] == text                  # bankier widzi ID
     assert pipeline.filter_output("analityk", text, vault, own_texts=[CLIENT])[0] == text   # sam je podał
+
+
+def test_nested_subagent_is_refused_and_logged(llm, env):
+    llm.queue = [
+        _reply(tool_calls=[_tool_call("create_subagent", user_message="List projects with a helper")]),
+        _reply(tool_calls=[_tool_call("create_subagent", user_message="List projects")]),   # subagent próbuje dalej
+        _reply("Nie mogę utworzyć kolejnego agenta."),
+        _reply("Pomocnik nie mógł utworzyć kolejnego agenta."),
+    ]
+    result = pipeline.run_turn(pipeline.Conversation("IT"), "Utwórz pomocnika, który utworzy kolejnego")
+
+    nested = [c for c in result.tool_calls if c.get("stage") == "subagent_depth"]
+    assert len(nested) == 1 and not nested[0]["allowed"]
+    assert any(c["tool"] == "create_subagent" and c["allowed"] for c in result.tool_calls)
+    assert '"stage": "subagent_depth"' in _audit(env)

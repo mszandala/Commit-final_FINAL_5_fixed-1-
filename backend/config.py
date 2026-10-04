@@ -124,6 +124,7 @@ CONTROLS = {
     "company_policies": "Company policy",
     "chatbot_refusal": "Chatbot refusal",
     "budget":         "Budget",
+    "subagent_depth": "Subagent depth",
     "model_policy":   "Model policy",
 }
 
