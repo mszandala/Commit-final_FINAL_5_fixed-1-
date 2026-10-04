@@ -33,6 +33,10 @@ export const getComments = (conversationId) => request(`/conversations/${convers
 export const addComment = (conversationId, comment) =>
   request(`/conversations/${conversationId}/comments`, { method: 'POST', body: comment })
 export const deleteComment = (id) => request(`/comments/${id}`, { method: 'DELETE' })
+// Live tests: scenarios from backend/live_tests/scenarios.json, run on the real model in the background.
+export const getTests = () => request('/tests')
+export const getTestRun = () => request('/tests/runs/current')
+export const startTestRun = (ids) => request('/tests/runs', { method: 'POST', body: { ids } })
 // All saved conversations with their turns, steps and comments, as a JSON download.
 export const EXPORT_URL = `${BASE}/conversations/export`
 export const endConversation = (id) => request(`/conversations/${id}`, { method: 'DELETE' })

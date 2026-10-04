@@ -619,3 +619,26 @@ def test_disabled_prompt_length_lets_long_prompt_through(llm):
     client.put(f"{API}/config", json={"filters": {"prompt_length": False}})
     body = _chat("basic_user", "słowo " * config.MAX_PROMPT_CHARS).json()
     assert body["text"] == "ok" and body["verdict"] is None
+
+
+# --- testy na żywym modelu (zakładka Tests) ----------------------------------------------------
+
+def test_live_tests_run_in_background_and_land_in_the_log(llm):
+    import time
+    catalog = client.get(f"{API}/tests").json()
+    scenario = next(s for s in catalog["scenarios"] if s["id"] == "config-prompt-length")
+    assert scenario["roleLabel"] == "IT" and {g["id"] for g in catalog["groups"]} >= {"access", "config"}
+
+    run = client.post(f"{API}/tests/runs", json={"ids": [scenario["id"]]}).json()
+    assert run["status"] == "running" and run["ids"] == [scenario["id"]]
+    for _ in range(100):
+        run = client.get(f"{API}/tests/runs/current").json()
+        if run["status"] == "done":
+            break
+        time.sleep(0.05)
+    result = run["results"][scenario["id"]]
+    assert result["status"] == "passed" and result["outcome"] == "blocked" and result["stage"] == "prompt_length"
+    assert client.get(f"{API}/events/{result['eventId']}").json()["stage"] == "prompt_length"
+    assert pipeline.MAX_PROMPT_CHARS == config.MAX_PROMPT_CHARS          # limit testu przywrócony
+
+    assert client.post(f"{API}/tests/runs", json={"ids": ["no-such-test"]}).status_code == 422

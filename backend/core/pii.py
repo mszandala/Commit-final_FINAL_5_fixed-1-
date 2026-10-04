@@ -104,6 +104,15 @@ def mask_prompt(conv: Conversation, prompt: str, *, policy: Policy, detect: Dete
     return masked, entities, blocked
 
 
+def pseudonymize_known_ids(text: str, vault: Vault, role_policy: dict, own: str) -> str:
+    """Identyfikator z sejfu wypisany wprost (np. model zna publiczny zbiór danych z treningu) wraca do
+    pseudonimu, gdy rola ma widzieć identyfikatory tylko jako pseudonimy."""
+    for token, entity_type, value in vault.entries():
+        if role_policy.get(entity_type) == "pseudonymize" and value and value not in own:
+            text = re.sub(rf"(?<!\d){re.escape(value)}(?!\d)", token, text)
+    return text
+
+
 class _AllowAll(dict):
     """Polityka PII roli, która niczego nie ukrywa ani nie blokuje (wyłączony filtr odpowiedzi)."""
 
@@ -129,6 +138,7 @@ def filter_output(role: str, text: str, vault: Optional[Vault] = None, own_texts
     role_policy = policy.pii_policy_for(role) if enforce else _AllowAll()
     own = "\n".join(own_texts)
     exempt = own + "\n" + "\n".join(public_texts)
+    text = pseudonymize_known_ids(text, vault, role_policy, own)
     spans = vault.token_spans(text)
 
     entities = [

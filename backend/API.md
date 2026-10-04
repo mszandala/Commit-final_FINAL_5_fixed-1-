@@ -33,6 +33,9 @@ python main.py
 | GET | `/events/{id}` | szczegóły tury: zamaskowany prompt, narzędzia, ślad audytu | — |
 | GET | `/stats` | podsumowanie logu dla zakładki Dashboard | — |
 | GET | `/health` | czy serwer żyje, jaki model | — |
+| GET | `/tests` | scenariusze testów na żywym modelu (`live_tests/scenarios.json`) z grupami | zakładka Tests |
+| POST | `/tests/runs` | uruchamia scenariusze w tle; body `{ids}`, brak = wszystkie; 409, gdy przebieg trwa | „Run all", „Run group" |
+| GET | `/tests/runs/current` | postęp i wyniki ostatniego przebiegu (null, gdy nie było) | odpytywanie co 1,5 s |
 
 ## Czat
 
