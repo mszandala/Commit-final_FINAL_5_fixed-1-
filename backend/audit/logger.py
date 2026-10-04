@@ -1,18 +1,27 @@
 import json
+import logging
+import sys
+import threading
 import time
 from contextvars import ContextVar
 from typing import Optional
 
-from config import AUDIT_LOG
+from config import AUDIT_LOG, AUDIT_SINK
 
-# Podsumowania tur dla API (jeden wiersz logu na turę, razem ze śladem); z tego pliku log
-# w interfejsie odtwarza się po restarcie serwera.
+log = logging.getLogger("control_layer.audit")
+
+# Dawny zapis podsumowań tur. Tury są teraz w bazie (audit/store.py); plik służy już tylko do
+# jednorazowego przeniesienia starszych wpisów.
 TURNS_LOG = AUDIT_LOG.with_name("turns.jsonl")
 
 # Zdarzenia bieżącej tury; pipeline ustawia kolektor, a moduły dopisują do niego przez record().
 _collector: ContextVar[Optional[list]] = ContextVar("_audit_collector", default=None)
 # Zegar tury: (start tury, chwila poprzedniego zdarzenia) — z niego liczymy czas każdego kroku.
 _clock: ContextVar[Optional[list]] = ContextVar("_audit_clock", default=None)
+
+# Zapis jednej tury to jeden blok linii; blokada nie pozwala przeplatać bloków równoległych tur.
+_write_lock = threading.Lock()
+_warned = False
 
 
 def start_turn() -> list:
@@ -39,22 +48,35 @@ def record(event_type: str, zone: str, **fields) -> None:
     clock[1] = now
 
 
+def _warn_once(exc: Exception) -> None:
+    global _warned
+    if not _warned:
+        _warned = True
+        log.warning("Nie można zapisać logu audytu do %s (%s). Tury działają dalej, a zdarzenia są w pamięci i "
+                    "w bazie rozmów. Wskaż zapisywalny katalog zmienną STATE_DIR albo ustaw AUDIT_SINK=stdout.",
+                    AUDIT_LOG, type(exc).__name__)
+
+
 def flush(events: list, **common) -> None:
-    """Zapisuje zdarzenia tury do pliku JSONL (jedno zdarzenie na linię)."""
+    """Zapisuje zdarzenia tury do wybranego ujścia (AUDIT_SINK): plik JSONL, stdout albo oba.
+
+    Błąd zapisu pliku nie przerywa tury: log audytu jest wtedy niepełny, a ostrzeżenie pojawia się raz.
+    """
     _collector.set(None)
     if not events:
         return
-    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(AUDIT_LOG, "a", encoding="utf-8") as f:
-        for event in events:
-            f.write(json.dumps({**common, **event}, ensure_ascii=False) + "\n")
-
-
-def append_turn(row: dict) -> None:
-    """Dopisuje podsumowanie tury (wiersz logu API) do pliku."""
-    TURNS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(TURNS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+    lines = "".join(json.dumps({**common, **event}, ensure_ascii=False) + "\n" for event in events)
+    if AUDIT_SINK in ("stdout", "both"):
+        sys.stdout.write(lines)
+        sys.stdout.flush()
+    if AUDIT_SINK in ("file", "both"):
+        try:
+            with _write_lock:
+                AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+                with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+                    f.write(lines)
+        except OSError as exc:
+            _warn_once(exc)
 
 
 def load_turns(limit: int = 2000) -> list[dict]:

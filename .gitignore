@@ -9,3 +9,8 @@ pyvenv.cfg
 backend/data/vector_db/
 
 backend/audit/*.jsonl
+backend/audit/*.db
+
+# Nadpisania polityki z interfejsu (stan lokalny)
+policy/*.overrides.json
+policy/*.overrides.json.tmp

@@ -10,7 +10,7 @@ from typing import Optional
 
 import pipeline
 from api.steps import build_steps, turn_level
-from audit import logger as audit_logger
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
@@ -25,6 +25,7 @@ from security.budget import Budget
 
 # Typy PII, o których decyduje konfiguracja roli (reszta jest globalna albo dotyczy identyfikatorów).
 ROLE_PII_TAGS = [t for t, action in DEFAULT_ROLE_PII_POLICY.items() if action == "redact" and t not in ID_TYPES]
+# Nazwy miejsc, organizacji i projektów widzi każda rola, więc nie ma ich wśród typów do ustawienia.
 AREA_TOOLS = {tool for area in DATA_ACCESS.values() for tool in area["tools"]}
 
 ROLE_BY_ID = {cfg["id"]: name for name, cfg in ROLES.items()}
@@ -61,12 +62,16 @@ def sensitivity_id(threshold: float) -> Optional[str]:
 
 def default_config() -> tuple[Settings, dict]:
     """Ustawienia i role startowe, bez ich stosowania."""
-    return Settings(**_DEFAULT_SETTINGS), _DEFAULT_ROLES
+    return Settings(**copy.deepcopy(_DEFAULT_SETTINGS)), _DEFAULT_ROLES
 
 
 def reset_config() -> None:
     for key, value in _DEFAULT_SETTINGS.items():
-        setattr(SETTINGS, key, value)
+        if isinstance(value, dict):         # na miejscu: referencje do słownika zostają ważne
+            getattr(SETTINGS, key).clear()
+            getattr(SETTINGS, key).update(value)
+        else:
+            setattr(SETTINGS, key, value)
     for name, cfg in _DEFAULT_ROLES.items():
         ROLES[name].clear()
         ROLES[name].update(copy.deepcopy(cfg))
@@ -106,8 +111,8 @@ _events_lock = threading.Lock()
 
 
 def load_events() -> None:
-    """Wczytuje log z pliku (start serwera), żeby przetrwał restart."""
-    rows = audit_logger.load_turns()
+    """Wczytuje log z bazy rozmów (start serwera), żeby przetrwał restart."""
+    rows = store.load_turns()
     for row in rows:
         row["time"] = datetime.fromisoformat(row["time"])
     with _events_lock:
@@ -175,13 +180,14 @@ def add_event(role: str, conversation_id: str, verdict: Optional[dict],
             "tokens": result.tokens if result else 0,
             "latency_ms": result.latency_ms if result else 0,
             "masked_prompt": result.masked_prompt if result else "",
+            "reply": next((e.get("reply") or "" for e in trail if e["type"] == "turn"), ""),
             "tools": tools,
             "leaks_to_chatbot": result.leaks_to_chatbot if result else 0,
             "trail": trail,
             "steps": steps,
         }
         _events.append(event)
-        audit_logger.append_turn({**event, "time": event["time"].isoformat()})
+        store.add_turn({**event, "time": event["time"].isoformat()})
         return event
 
 
@@ -195,6 +201,39 @@ def list_events(after_id: Optional[int] = None, limit: int = 200, decision: Opti
 def get_event(event_id: int) -> Optional[dict]:
     with _events_lock:
         return next((e for e in _events if e["id"] == event_id), None)
+
+
+def list_conversations() -> list[dict]:
+    """Rozmowy z logu, od najstarszej: podsumowanie tur i liczba komentarzy."""
+    counts = store.comment_counts()
+    with _events_lock:
+        rows = list(_events)
+    grouped: dict[str, list[dict]] = {}
+    for event in rows:
+        grouped.setdefault(event["conversation_id"], []).append(event)
+    levels = ["info", "warn", "block"]
+    return [{
+        "id": conversation_id,
+        "role": turns[0]["role"],
+        "role_id": turns[0]["role_id"],
+        "user": turns[0]["user"],
+        "started_at": turns[0]["time"],
+        "last_at": turns[-1]["time"],
+        "turn_count": len(turns),
+        "level": max((t["level"] for t in turns), key=levels.index),
+        "comment_count": counts.get(conversation_id, 0),
+    } for conversation_id, turns in grouped.items()]
+
+
+def get_conversation(conversation_id: str) -> Optional[dict]:
+    summary = next((c for c in list_conversations() if c["id"] == conversation_id), None)
+    if summary is None:
+        return None
+    comments = store.list_comments(conversation_id)
+    with _events_lock:
+        turns = [{**e, "comments": [c for c in comments if c["event_id"] == e["id"]]}
+                 for e in _events if e["conversation_id"] == conversation_id]
+    return {**summary, "comments": comments, "turns": turns}
 
 
 def reset_state() -> None:

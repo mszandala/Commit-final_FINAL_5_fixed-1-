@@ -79,8 +79,10 @@ def test_role_policy_resolution():
     assert role_policy("analityk")["CLIENT-ID"] == "pseudonymize"
     assert role_policy("bankier")["CLIENT-ID"] == "allow"
     assert role_policy("nieznana")["EMAIL"] == "redact"
-    assert role_policy("podstawowy użytkownik")["LOCATION"] == "redact"
-    assert role_policy("prawnik")["LOCATION"] == "allow"
+    # miejsca, organizacje i projekty widzi każda rola, także bez wpisu w allowed_pii
+    assert role_policy("podstawowy użytkownik")["LOCATION"] == "allow"
+    assert role_policy("IT")["ORGANIZATION"] == role_policy("nieznana")["PROJECT"] == "allow"
+    assert role_policy("podstawowy użytkownik")["PESEL"] == "redact"
 
 
 def test_global_rules_apply_to_every_role(monkeypatch):

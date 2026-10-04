@@ -71,9 +71,14 @@ Odpowiedź (`ChatResponse`):
 - `verdict` to najważniejsza decyzja tury albo `null`:
   `{ "decision": "warn" | "refuse" | "redact" | "block", "stage": "...", "reason": "..." }`.
 - `refuse` (etap `chatbot_refusal`) oznacza, że warstwa niczego nie zablokowała, ale sam chatbot odmówił:
-  `text` zawiera wtedy jego odpowiedź. Odmowę rozpoznają lokalnie słowa kluczowe i model embeddingów.
-- `stage` to klucz z `GET /meta → controls`: `prompt_guard`, `tool_whitelist`, `pii_policy`,
-  `code_guard`, `company_policies`, `budget`. Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
+  `text` zawiera wtedy jego odpowiedź. Słowa kluczowe, model embeddingów i odrzucone narzędzie wskazują
+  kandydata; rozstrzyga sędzia LLM (przy jego awarii zostaje sama heurystyka).
+- `stage` to klucz z `GET /meta → controls`: `prompt_length`, `prompt_guard`, `tool_whitelist`, `pii_policy`,
+  `code_guard`, `company_policies`, `chatbot_refusal`, `budget`. `prompt_length` blokuje prompt dłuższy niż
+  `MAX_PROMPT_CHARS` (domyślnie 4000 znaków). `budget` jako `block` oznacza wyczerpany budżet roli, a jako
+  `warn` — że w tej turze bramka przerwała wywołania narzędzi po przekroczeniu limitu tokenów lub kosztu tury.
+- `tools[]` dla wykonanych wywołań ma też `tokens` i `cost` (zużycie w trakcie wywołania, np. subagenta)
+  oraz `resultTokens` (szacunek, ile wynik dokłada do kontekstu modelu). Lista może rosnąć (np. o sędziów LLM), więc nazwę do wyświetlenia
   warto brać z `/meta`, a nieznany klucz pokazywać wprost.
 - `verdicts` to wszystkie decyzje tury, od najważniejszej; `verdict` to jej pierwszy element. Przykład:
   ostrzeżenie strażnika promptu i ukrycie e-maila w tej samej turze dają `["redact", "warn"]`.
@@ -141,7 +146,10 @@ Różnice względem `mock/config.js`:
   Pole z podglądem klucza może pokazywać wyłącznie to, co użytkownik właśnie wpisał.
 - **`sensitivity` to id poziomu** (`low` / `balanced` / `high`), nie indeks. `null` oznacza próg
   spoza listy.
-- **`guardMode`:** `warn` przepuszcza i oznacza, `block` zatrzymuje zapytanie przed modelem.
+- **`guardMode`:** `warn` przepuszcza i oznacza, `block` (domyślny) zatrzymuje zapytanie przed modelem.
+  O naruszeniu rozstrzyga klasyfikator intencji (LLM): zapytanie spoza pracy roli, o dane spoza jej
+  uprawnień albo próba obejścia zabezpieczeń. Słowa kluczowe strażnika same tylko ostrzegają; blokują
+  dopiero przy wyłączonym klasyfikatorze (`INTENT_CLASSIFIER_ENABLED=false`).
 - **`maskPii: false`:** dane nie są ukrywane w odpowiedzi ani maskowane przed modelem; typy zawsze
   blokujące (hasło, numer karty) nadal blokują.
 - **`roles[].access`** mapuje się na narzędzia z `GET /meta → dataAccess`. Analityk ma także
@@ -226,8 +234,8 @@ z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
 }
 ```
 
-- `kind`: `prompt_guard`, `company_policy`, `prompt_masking`, `pii_judge`, `model_call`, `tool_call`,
-  `output_filter`, `refusal`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
+- `kind`: `prompt_length`, `prompt_guard`, `intent`, `company_policy`, `prompt_masking`, `pii_judge`,
+  `model_call`, `tool_call`, `output_filter`, `refusal`, `retry`, `budget`, `error`; nazwy w `GET /meta → stepKinds`.
 - `zone`: `security`, `chatbot`, `local`; nazwy w `GET /meta → zones`.
 - `level`: `info` — bez zastrzeżeń, `warn` — flaga, ostrzeżenie albo ukrycie danych, `block` — blokada,
   odrzucone narzędzie albo błąd.
@@ -235,7 +243,24 @@ z ostrzeżeniem lub blokadą, `minLevel=block` same blokady.
 - `atMs` to czas od początku tury, `durationMs` — czas od poprzedniego kroku.
 - `details` to pełne zdarzenie audytu, bez surowych wartości wrażliwych.
 
-Log jest zapisywany w `backend/audit/turns.jsonl` i wczytywany przy starcie serwera.
+Log jest zapisywany w bazie rozmów (niżej) i wczytywany przy starcie serwera.
+
+### Zapisane rozmowy i komentarze
+
+Tury są zapisywane w bazie `backend/audit/conversations.db` (SQLite) i pogrupowane w rozmowy po
+`conversationId`. Treści mają tę samą, zamaskowaną postać co w logu.
+
+| Metoda | Ścieżka | Do czego |
+|---|---|---|
+| GET | `/conversations` | lista rozmów: rola, użytkownik, czas, liczba tur, poziom, liczba komentarzy |
+| GET | `/conversations/{id}` | jedna rozmowa: tury z krokami i komentarze |
+| GET | `/conversations/export` | wszystkie rozmowy z turami, krokami i komentarzami jako plik JSON |
+| GET | `/conversations/{id}/comments` | komentarze rozmowy |
+| POST | `/conversations/{id}/comments` | nowy komentarz: `{ "text": "...", "author": "QA", "eventId": 12 }` |
+| DELETE | `/comments/{id}` | usunięcie komentarza |
+
+`author` (domyślnie „QA") i `eventId` (tura, której dotyczy uwaga) są opcjonalne. Wiersze
+`GET /events` mają `commentCount` — liczbę komentarzy do rozmowy, do której należy tura.
 
 `GET /stats`:
 
@@ -247,6 +272,7 @@ Log jest zapisywany w `backend/audit/turns.jsonl` i wczytywany przy starcie serw
 ## Czego w v1 nie ma
 
 - **Załączniki.** Composer pozwala dodać pliki, ale backend nie ma jeszcze ich obsługi.
-- **Trwałość konfiguracji i rozmów.** Znikają po restarcie serwera; zostają log (`audit/turns.jsonl`,
-  `audit/events.jsonl`) i budżety (`spending.db`).
+- **Trwałość konfiguracji i kontekstu rozmowy.** Zmiany konfiguracji i historia, którą widzi model,
+  znikają po restarcie serwera; zostają zapisane rozmowy (`audit/conversations.db`), log zdarzeń
+  (`audit/events.jsonl`) i budżety (`spending.db`).
 - **Uwierzytelnianie.** Każdy klient może wybrać dowolną rolę i zmienić konfigurację.

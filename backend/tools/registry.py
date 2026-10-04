@@ -3,8 +3,8 @@ from tools._code import run_python
 def create_subagent(user_message: str) -> str:
     from tools._subagent import create_subagent as _subagent_impl
     return _subagent_impl(user_message)
-from tools.banking_tools import read_bank_campaigns, read_client_records
-from tools.hr_tools import read_employee_records
+from tools.banking_tools import read_bank_campaigns, read_client_records, summarize_client_records
+from tools.hr_tools import read_employee_records, summarize_employee_records
 from tools.market_tools import list_earnings_calls, read_earnings_call, read_stock_prices
 from tools.projects_tools import list_projects, read_project
 
@@ -13,7 +13,9 @@ TOOLS = [
     list_projects,
     read_project,
     read_employee_records,
+    summarize_employee_records,
     read_client_records,
+    summarize_client_records,
     read_bank_campaigns,
     read_stock_prices,
     list_earnings_calls,

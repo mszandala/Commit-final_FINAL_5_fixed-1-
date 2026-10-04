@@ -9,18 +9,25 @@ import queue
 import threading
 from collections import Counter
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 import pipeline
+from api import metrics as metrics_mod
 from api import schemas, state
+from core import PolicyError, get_store
+from proxy import create_router as create_proxy_router
+from proxy import get_engine as get_proxy_engine
 from api.steps import LEVELS, STEP_KINDS, ZONES
+from audit import store
 from config import (
     CONTROLS,
     DATA_ACCESS,
+    FILTERS,
     GLOBAL_BLOCKED_PII,
     GLOBAL_REDACTED_PII,
     MAX_SPENDING,
@@ -58,6 +65,13 @@ def _role_name(role_id: str) -> str:
     return name
 
 
+def _config_problem() -> Optional[str]:
+    """Powód, dla którego model nie odpowie, zanim zaczniemy turę (np. brak klucza dostawcy)."""
+    if SETTINGS.provider == "openrouter" and not SETTINGS.openrouter_api_key:
+        return "Brak klucza OpenRouter: ustaw OPENROUTER_API_KEY w backend/.env albo podaj klucz w konfiguracji"
+    return None
+
+
 def _budget(name: str) -> schemas.Budget:
     return schemas.Budget(limit=state.budget.token_limit(name), used=state.budget.tokens_used(name),
                           spending_limit=MAX_SPENDING, spent=round(state.budget.spent(name), 6))
@@ -80,6 +94,7 @@ def _config(settings=SETTINGS, roles: dict = ROLES) -> schemas.Config:
         pii_threshold=settings.pii_threshold,
         guard_mode=settings.guard_mode,
         mask_pii=settings.mask_pii,
+        filters=dict(settings.filters),
         roles=[_role_config(name, roles) for name in roles],
     )
 
@@ -98,6 +113,8 @@ def _open(request: schemas.ChatRequest) -> tuple[str, state.Session]:
 def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_progress=None) -> schemas.ChatResponse:
     """Jedna tura czatu: budżet -> pipeline -> wiersz logu -> odpowiedź."""
     conv = session.conversation
+    if problem := _config_problem():
+        raise HTTPException(503, problem)
     over_budget = state.budget.check(name, request.message)
     if over_budget:
         event = state.add_event(name, conv.id, over_budget)
@@ -106,7 +123,9 @@ def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_pro
                                     tokens=0, cost=0, latency_ms=0, budget=_budget(name))
 
     with session.lock:
-        result = pipeline.run_turn(conv, request.message, on_progress=on_progress)
+        left = {"tokens": state.budget.token_limit(name) - state.budget.tokens_used(name),
+                "cost": MAX_SPENDING - state.budget.spent(name)}
+        result = pipeline.run_turn(conv, request.message, on_progress=on_progress, limits=left)
     state.budget.add(name, result.tokens, result.cost, SETTINGS.model)
     event = state.add_event(name, conv.id, result.verdict, result)
     if result.error:
@@ -131,7 +150,9 @@ def _run(name: str, session: state.Session, request: schemas.ChatRequest, on_pro
 
 @router.get("/health", response_model=schemas.Health, tags=["meta"])
 def health():
-    return {"status": "ok", "provider": SETTINGS.provider, "model": SETTINGS.model}
+    problem = _config_problem()
+    return {"status": "degraded" if problem else "ok", "provider": SETTINGS.provider, "model": SETTINGS.model,
+            "problem": problem}
 
 
 @router.get("/meta", response_model=schemas.Meta, tags=["meta"],
@@ -139,6 +160,7 @@ def health():
 def meta():
     return schemas.Meta(
         models=MODEL_PRESETS,
+        filters=FILTERS,
         sensitivity_levels=PII_SENSITIVITY_LEVELS,
         data_access=[{"id": area, **cfg} for area, cfg in DATA_ACCESS.items()],
         pii_tags=state.ROLE_PII_TAGS,
@@ -169,6 +191,21 @@ def reset_budget(role_id: Optional[str] = Query(None, alias="roleId")):
     return roles()
 
 
+@router.get("/policy", response_model=schemas.PolicyStatus, tags=["config"],
+            summary="Stan pliku polityki: wersja, skrót, aktywny profil, nadpisania, ostatnie zmiany i błąd pliku",
+            description="Plik polityki jest przeładowywany na żywo; ten endpoint pokazuje, co obowiązuje i czy ostatnia "
+                        "zmiana pliku została przyjęta. Uwaga: demo czyta jeszcze ustawienia z config.py i panelu "
+                        "konfiguracji; polityka z pliku steruje na razie etapami z pakietu `core` (proxy).")
+def get_policy(full: bool = Query(False, description="Dołącz całą obowiązującą politykę")):
+    try:
+        store = get_store()
+        status = store.status()
+        status["policy"] = store.get().model_dump(mode="json") if full else None
+    except PolicyError as exc:
+        raise HTTPException(503, f"Plik polityki jest niepoprawny: {exc}") from None
+    return status
+
+
 @router.get("/config", response_model=schemas.Config, tags=["config"])
 def get_config():
     return _config()
@@ -193,6 +230,10 @@ def update_config(update: schemas.ConfigUpdate):
             raise HTTPException(422, f"Nieznany poziom czułości: {update.sensitivity}")
         threshold = levels[update.sensitivity]
 
+    unknown_filters = [f for f in update.filters or {} if f not in SETTINGS.filters]
+    if unknown_filters:
+        raise HTTPException(422, f"Nieznane filtry: {unknown_filters}")
+
     for role in update.roles or []:
         if role.id not in state.ROLE_BY_ID:
             raise HTTPException(422, f"Nieznana rola: {role.id}")
@@ -208,9 +249,16 @@ def update_config(update: schemas.ConfigUpdate):
         SETTINGS.guard_mode = update.guard_mode
     if update.mask_pii is not None:
         SETTINGS.mask_pii = update.mask_pii
+    SETTINGS.filters.update(update.filters or {})
     for role in update.roles or []:
         state.set_role(state.ROLE_BY_ID[role.id], role.access, role.pii)
     return _config()
+
+
+@router.get("/filters", response_model=list[schemas.FilterState], tags=["config"],
+            summary="Filtry bezpieczeństwa z opisem i stanem (włączony / wyłączony); zmiana przez PUT /config")
+def filters():
+    return [{**f, "enabled": SETTINGS.filters[f["id"]]} for f in FILTERS]
 
 
 @router.get("/config/defaults", response_model=schemas.Config, tags=["config"],
@@ -288,6 +336,8 @@ def events(after_id: Optional[int] = Query(None, alias="afterId", ge=0),
     rows = state.list_events(after_id, limit, decision)
     if min_level:
         rows = [e for e in rows if LEVELS.index(e["level"]) >= LEVELS.index(min_level)]
+    counts = store.comment_counts()
+    rows = [{**e, "comment_count": counts.get(e["conversation_id"], 0)} for e in rows]
     return rows if steps else [{**e, "steps": None} for e in rows]
 
 
@@ -312,6 +362,31 @@ def stats():
     )
 
 
+def _window(since_minutes: Optional[int]) -> list[dict]:
+    rows = state.list_events(limit=10**9)
+    since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes) if since_minutes else None
+    return metrics_mod.filter_since(rows, since)
+
+
+@router.get("/metrics", response_model=schemas.Metrics, tags=["logs"],
+            summary="Metryki dla zarządu i zespołu bezpieczeństwa: blokady, koszty, opóźnienia całych tur i każdej kontroli")
+def metrics(since_minutes: Optional[int] = Query(None, alias="sinceMinutes", ge=1,
+                                                 description="Tylko tury z ostatnich N minut; bez tego cały log")):
+    return metrics_mod.compute_metrics(_window(since_minutes))
+
+
+@router.get("/audit/export", tags=["logs"], response_class=Response,
+            summary="Eksport logu audytu do analizy: JSONL (pełny ślad tur) albo CSV (jeden wiersz na turę)",
+            responses={200: {"content": {"application/x-ndjson": {}, "text/csv": {}}}})
+def audit_export(fmt: Literal["jsonl", "csv"] = Query("jsonl", alias="format"),
+                 since_minutes: Optional[int] = Query(None, alias="sinceMinutes", ge=1)):
+    rows = _window(since_minutes)
+    headers = {"Content-Disposition": f'attachment; filename="audit.{fmt}"'}
+    if fmt == "csv":
+        return Response(metrics_mod.export_csv(rows), media_type="text/csv; charset=utf-8", headers=headers)
+    return StreamingResponse(metrics_mod.export_jsonl(rows), media_type="application/x-ndjson", headers=headers)
+
+
 def _warm_up() -> None:
     """Ładuje model GLiNER w tle, żeby pierwsza wiadomość nie czekała na jego wczytanie (lub pobranie)."""
     try:
@@ -330,12 +405,79 @@ async def _lifespan(app: FastAPI):
     yield
 
 
+# --- zapisane rozmowy i komentarze -----------------------------------------------------------
+
+def _known_conversation(conversation_id: str) -> None:
+    if state.get_conversation(conversation_id) is None:
+        raise HTTPException(404, f"Nieznana rozmowa: {conversation_id}")
+
+
+@router.get("/conversations", response_model=list[schemas.Conversation], tags=["conversations"],
+            summary="Zapisane rozmowy, od najstarszej, z liczbą tur i komentarzy")
+def conversations():
+    return state.list_conversations()
+
+
+@router.get("/conversations/export", tags=["conversations"],
+            summary="Wszystkie zapisane rozmowy z turami, krokami i komentarzami jako plik JSON")
+def export_conversations():
+    data = [schemas.ConversationDetail(**state.get_conversation(c["id"])).model_dump(by_alias=True, mode="json")
+            for c in state.list_conversations()]
+    return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="conversations.json"'})
+
+
+@router.get("/conversations/{conversation_id}", response_model=schemas.ConversationDetail, tags=["conversations"],
+            summary="Jedna rozmowa: wszystkie tury z krokami oraz komentarze")
+def conversation(conversation_id: str):
+    _known_conversation(conversation_id)
+    return state.get_conversation(conversation_id)
+
+
+@router.get("/conversations/{conversation_id}/comments", response_model=list[schemas.Comment],
+            tags=["conversations"])
+def comments(conversation_id: str):
+    _known_conversation(conversation_id)
+    return store.list_comments(conversation_id)
+
+
+@router.post("/conversations/{conversation_id}/comments", response_model=schemas.Comment, status_code=201,
+             tags=["conversations"], summary="Dodaje komentarz do rozmowy (opcjonalnie do konkretnej tury)")
+def add_comment(conversation_id: str, comment: schemas.CommentCreate):
+    _known_conversation(conversation_id)
+    if comment.event_id is not None:
+        event = state.get_event(comment.event_id)
+        if event is None or event["conversation_id"] != conversation_id:
+            raise HTTPException(422, f"Tura {comment.event_id} nie należy do tej rozmowy")
+    return store.add_comment(conversation_id, comment.text.strip(), comment.author.strip(), comment.event_id)
+
+
+@router.delete("/comments/{comment_id}", status_code=204, tags=["conversations"])
+def delete_comment(comment_id: int):
+    if not store.delete_comment(comment_id):
+        raise HTTPException(404, f"Nieznany komentarz: {comment_id}")
+
+
+def _proxy_turn(report: dict) -> None:
+    """Tura przez proxy trafia do tego samego logu co czat z interfejsu (dla ról znanych w config.ROLES)."""
+    if report["role"] not in ROLES:
+        return
+    result = pipeline.TurnResult(
+        reply=report["reply"], blocked=report["blocked"], block_reason=report["block_reason"],
+        guard=report["guard"], masked_prompt=report["masked_prompt"], prompt_entities=report["entities"],
+        tool_calls=report["tool_calls"], output=report["output"], leaks_to_chatbot=0, events=report["events"],
+        verdict=report["verdict"], tokens=report["tokens"], latency_ms=report["latency_ms"], error=None,
+        cost=report["cost"], verdicts=report["verdicts"], masked_for_model=report["masked_for_model"])
+    state.add_event(report["role"], report["conversation_id"], report["verdict"], result)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AI Security Layer API", version="1.0.0", lifespan=_lifespan)
     origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
     app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in origins if o.strip()],
                        allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
+    get_proxy_engine().on_turn = _proxy_turn
+    app.include_router(create_proxy_router(get_proxy_engine))      # /v1/chat/completions, /v1/models
     return app
 
 

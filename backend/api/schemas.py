@@ -25,8 +25,12 @@ class ToolCall(ApiModel):
     tool: str
     args: dict[str, Any] = Field(description="Argumenty w postaci, w jakiej wysłał je model (zamaskowane)")
     allowed: bool
-    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist albo code_guard")
+    stage: Optional[str] = Field(None, description="Kto odrzucił wywołanie: tool_whitelist, code_guard, "
+                                                   "company_policies albo budget")
     reason: Optional[str] = None
+    tokens: Optional[int] = Field(None, description="Tokeny zużyte w trakcie wywołania (np. przez subagenta)")
+    cost: Optional[float] = Field(None, description="Koszt wywołania w dolarach")
+    result_tokens: Optional[int] = Field(None, description="Szacunek, ile tokenów wynik dokłada do kontekstu modelu")
 
 
 class Budget(ApiModel):
@@ -81,6 +85,7 @@ class Config(ApiModel):
     pii_threshold: float
     guard_mode: Literal["warn", "block"]
     mask_pii: bool
+    filters: dict[str, bool] = Field(description="Id filtra z GET /meta -> filters -> czy jest włączony")
     roles: list[RoleConfig]
 
 
@@ -92,6 +97,7 @@ class ConfigUpdate(ApiModel):
     sensitivity: Optional[str] = None
     guard_mode: Optional[Literal["warn", "block"]] = None
     mask_pii: Optional[bool] = None
+    filters: Optional[dict[str, bool]] = Field(None, description="Tylko filtry do zmiany; pominięte zostają bez zmian")
     roles: Optional[list[RoleConfig]] = None
 
 
@@ -115,8 +121,19 @@ class DataAccessArea(ApiModel):
     tools: list[str]
 
 
+class FilterInfo(ApiModel):
+    id: str
+    label: str
+    description: str
+
+
+class FilterState(FilterInfo):
+    enabled: bool
+
+
 class Meta(ApiModel):
     models: list[ModelPreset]
+    filters: list[FilterInfo] = Field(description="Filtry, które można wyłączyć; stan w GET /config -> filters")
     sensitivity_levels: list[SensitivityLevel]
     data_access: list[DataAccessArea]
     pii_tags: list[str] = Field(description="Typy PII ustawiane per rola")
@@ -162,8 +179,12 @@ class Event(ApiModel):
     reason: str
     level: Level = Field(description="Najwyższy poziom spośród kroków tury")
     step_count: int
+    comment_count: int = Field(0, description="Liczba komentarzy do rozmowy, do której należy tura")
     steps: Optional[list[Step]] = Field(None, description="Kroki tury; w liście tylko przy ?steps=true")
-    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota")
+    masked_prompt: str = Field(description="Prompt w postaci wysłanej do chatbota; dla tury zablokowanej przed "
+                                           "modelem — prompt z wartościami wrażliwymi zamienionymi na etykiety")
+    reply: str = Field("", description="Odpowiedź chatbota z wartościami wrażliwymi zamienionymi na etykiety; "
+                                       "pusta, gdy model nie odpowiedział")
     masked_for_model: list[str] = Field(description="Typy danych z promptu ukryte przed chatbotem")
     model: Optional[str] = Field(description="Model chatbota w tej turze; null, gdy nie był wołany")
     tokens: int
@@ -177,6 +198,44 @@ class EventDetail(Event):
     trail: list[dict[str, Any]] = Field(description="Zdarzenia audytu tury z polem zone; bez surowych wartości")
 
 
+class Comment(ApiModel):
+    id: int
+    conversation_id: str
+    event_id: Optional[int] = Field(description="Tura, której dotyczy komentarz; null = cała rozmowa")
+    author: str
+    text: str
+    time: datetime
+
+
+class CommentCreate(ApiModel):
+    text: str = Field(min_length=1, max_length=4000)
+    author: str = Field("QA", min_length=1, max_length=80)
+    event_id: Optional[int] = None
+
+
+class Conversation(ApiModel):
+    id: str
+    role: str
+    role_id: str
+    user: str
+    started_at: datetime
+    last_at: datetime
+    turn_count: int
+    level: Level = Field(description="Najwyższy poziom spośród tur rozmowy")
+    comment_count: int
+
+
+class ConversationTurn(EventDetail):
+    comments: list[Comment] = Field(default_factory=list, description="Komentarze dodane przy tej turze")
+
+
+class ConversationDetail(Conversation):
+    # Komentarze przed turami: w wyeksportowanym pliku są wtedy na początku rozmowy, a nie po
+    # kilkuset liniach kroków.
+    comments: list[Comment] = Field(description="Wszystkie komentarze rozmowy")
+    turns: list[ConversationTurn]
+
+
 class Stats(ApiModel):
     total: int
     by_decision: dict[str, int]
@@ -185,7 +244,56 @@ class Stats(ApiModel):
     avg_latency_ms: int
 
 
+class Metrics(ApiModel):
+    total: int = Field(description="Liczba tur w oknie")
+    window: dict[str, Optional[datetime]] = Field(description="Czas pierwszej i ostatniej tury: from, to")
+    by_decision: dict[str, int]
+    by_control: dict[str, int] = Field(description="Które kontrole zdecydowały (nazwy jak w GET /meta -> controls)")
+    by_role: dict[str, int]
+    by_level: dict[str, int]
+    blocked_rate: float = Field(description="Udział tur zablokowanych (0-1)")
+    intervention_rate: float = Field(description="Udział tur, w których warstwa coś zrobiła: blokada, ukrycie, odmowa, ostrzeżenie")
+    tokens: int = Field(description="Tokeny strefy chatbota (to, co liczy się do budżetu)")
+    cost_usd: float
+    security_tokens: int = Field(description="Tokeny strażników i sędziów (nie obciążają budżetu użytkownika)")
+    security_cost_usd: float
+    latency_ms: dict[str, int] = Field(description="Czas całej tury: avg, p50, p95, p99, max")
+    step_timings_ms: dict[str, dict[str, int]] = Field(
+        description="Czas każdego rodzaju kroku (kontroli): count, avg, p50, p95, p99, max; nazwy w GET /meta -> stepKinds")
+    zone_avg_ms: dict[str, int] = Field(description="Średni czas na turę w strefach: security, chatbot, local")
+    blocked_by_step: dict[str, int] = Field(description="Ile razy dany krok zablokował")
+    warned_by_step: dict[str, int] = Field(description="Ile razy dany krok ostrzegł albo ukrył dane")
+    by_attack_type: dict[str, int] = Field(description="Wykryte ataki po typie (Prompt_Injection, Sandbox_Escape, ...)")
+
+
+class PolicyChange(ApiModel):
+    path: str = Field(description="Klucz w pliku polityki, np. controls.prompt_guard.mode")
+    old: Any = None
+    new: Any = None
+
+
+class PolicyProblem(ApiModel):
+    message: str
+    problems: list[str] = Field(description="Po jednym opisie na błąd, ze ścieżką klucza")
+    at: float = Field(description="Czas błędu (sekundy od epoki)")
+
+
+class PolicyStatus(ApiModel):
+    path: str = Field(description="Plik polityki")
+    version: int = Field(description="Rośnie przy każdej zmianie treści polityki (od 1 przy starcie)")
+    digest: str = Field(description="Skrót obowiązującej polityki; ten sam skrót = ta sama polityka")
+    profile: str = Field(description="Aktywny profil ścisłości")
+    profiles: list[str] = Field(description="Profile zdefiniowane w pliku")
+    loaded_at: Optional[float] = Field(description="Kiedy wczytano obowiązującą wersję (sekundy od epoki)")
+    overridden: list[str] = Field(description="Klucze nadpisane z interfejsu (wygrywają z plikiem i profilem)")
+    last_changes: list[PolicyChange] = Field(description="Co zmieniło ostatnie przeładowanie")
+    error: Optional[PolicyProblem] = Field(description="Błąd ostatniej próby przeładowania; wtedy obowiązuje "
+                                                      "poprzednia poprawna wersja. null = plik jest poprawny")
+    policy: Optional[dict[str, Any]] = Field(None, description="Cała obowiązująca polityka; tylko przy ?full=true")
+
+
 class Health(ApiModel):
-    status: str
+    status: str = Field(description='"ok" albo "degraded", gdy konfiguracja nie pozwala wołać modelu')
     provider: str
     model: str
+    problem: Optional[str] = Field(None, description="Co jest nie tak z konfiguracją; null, gdy wszystko w porządku")

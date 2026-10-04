@@ -1,10 +1,16 @@
 from typing import Optional
 
-from config import ROLES
+from config import DATA_ACCESS, ROLES
 
 
 def is_allowed(role: str, tool: str) -> bool:
     return tool in ROLES.get(role, {}).get("allowed_tools", [])
+
+
+def role_areas(role: str) -> list[str]:
+    """Nazwy obszarów danych dostępnych dla roli — to pokazujemy modelowi zamiast nazw narzędzi."""
+    allowed = set(ROLES.get(role, {}).get("allowed_tools", []))
+    return [area["label"] for area in DATA_ACCESS.values() if set(area["tools"]) <= allowed]
 
 
 class ToolGate:
@@ -32,10 +38,10 @@ class ToolGate:
         self.calls.append(call)
         if allowed:
             return None
-        allowed_tools = ROLES.get(self.role, {}).get("allowed_tools", [])
-        tools_str = ", ".join(allowed_tools) if allowed_tools else "none"
+        areas = ", ".join(role_areas(self.role)) or "none"
         return (
-            f"Access denied: tool '{name}' is not authorized for the user's role ('{self.role}'). "
-            f"Authorized tools for this role are: [{tools_str}]. "
-            f"Do not call '{name}' again. If an authorized tool can answer the user's query, call that tool instead."
+            f"Access denied: this data is not available for the user's role ('{self.role}'). "
+            f"Data areas available to this role: {areas}. Do not make this call again. If an available area "
+            "can answer the user's question, use it; otherwise tell the user this data is not available for "
+            "their role. Do not mention the names of internal tools in your reply."
         )

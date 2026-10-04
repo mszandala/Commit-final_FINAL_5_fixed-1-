@@ -8,7 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Iterable, Optional
 
 from security.company_policies.audit import DEFAULT_AUDIT_PATH, AuditLog, content_digest
 from security.company_policies.detection import (
@@ -57,10 +57,12 @@ class CompanyPolicyEngine:
     def __init__(self, rules_path: Path = DEFAULT_RULES_PATH, classifier: Classifier = llm_classifier,
                  audit_path: Optional[Path] = DEFAULT_AUDIT_PATH,
                  documents_dir: Path = DEFAULT_DOCUMENTS_DIR, fixtures_dir: Path = DEFAULT_FIXTURES_DIR,
-                 reload_interval: float = DEFAULT_RELOAD_INTERVAL):
+                 reload_interval: float = DEFAULT_RELOAD_INTERVAL,
+                 known_roles: Optional[Callable[[], Iterable[str]]] = None):
         self.audit = AuditLog(audit_path)
         self.store = PolicyStore(rules_path, on_event=self.audit.write, documents_dir=documents_dir,
-                                 fixtures_dir=fixtures_dir, reload_interval=reload_interval)
+                                 fixtures_dir=fixtures_dir, reload_interval=reload_interval,
+                                 known_roles=known_roles)
         self.classifier = classifier
         self._semantic_cache: OrderedDict = OrderedDict()
         self._semantic_cache_policy: Optional[Policy] = None

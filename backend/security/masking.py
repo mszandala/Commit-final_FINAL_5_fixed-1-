@@ -5,7 +5,7 @@ import io
 import re
 import secrets
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from config import (
     BASE_DIR,
@@ -72,7 +72,10 @@ class Vault:
     (ID-3fa9c21b07), taki sam w każdej rozmowie, żeby dało się po nim grupować i liczyć.
     """
 
-    def __init__(self):
+    def __init__(self, id_types: Optional[Iterable[str]] = None):
+        # Typy zamieniane na stałe pseudonimy. None = lista z config.py (tryb zgodności); warstwa ustawia
+        # tu typy z polityki, więc zmiana polityki działa od następnego użycia sejfu.
+        self.id_types: Optional[tuple[str, ...]] = tuple(id_types) if id_types is not None else None
         self._by_key: dict[str, tuple[str, str, str]] = {}   # klucz znacznika -> (znacznik, typ, wartość)
         self._by_value: dict[tuple[str, str], str] = {}      # (typ, wartość) -> znacznik
         self._counters: dict[str, int] = {}
@@ -80,11 +83,14 @@ class Vault:
     def __len__(self) -> int:
         return len(self._by_key)
 
+    def is_id_type(self, entity_type: str) -> bool:
+        return entity_type in (self.id_types if self.id_types is not None else ID_TYPES)
+
     def token_for(self, entity_type: str, value: str) -> str:
         known = self._by_value.get((entity_type, value))
         if known:
             return known
-        if entity_type in ID_TYPES:
+        if self.is_id_type(entity_type):
             digest = hmac.new(_PSEUDONYM_KEY, f"{entity_type}:{value}".encode(), hashlib.sha256).hexdigest()
             token = f"ID-{digest[:10]}"
             key = digest[:10]
@@ -102,7 +108,7 @@ class Vault:
 
     def raw_values(self) -> list[str]:
         """Wartości na tyle długie, że da się ich wiarygodnie szukać w tekście."""
-        return [v for _, t, v in self._by_key.values() if len(v) >= MIN_KNOWN_VALUE_LEN and t not in ID_TYPES]
+        return [v for _, t, v in self._by_key.values() if len(v) >= MIN_KNOWN_VALUE_LEN and not self.is_id_type(t)]
 
     def mask_entities(self, text: str, entities: list[dict]) -> str:
         """Zamienia wskazane encje ({"type","start","end"}) na znaczniki."""
@@ -114,7 +120,7 @@ class Vault:
     def mask_known(self, text: str) -> str:
         """Maskuje wartości, które już są w sejfie, gdziekolwiek pojawią się ponownie."""
         for token, entity_type, value in sorted(self._by_key.values(), key=lambda x: -len(x[2])):
-            if len(value) >= MIN_KNOWN_VALUE_LEN and entity_type not in ID_TYPES and value in text:
+            if len(value) >= MIN_KNOWN_VALUE_LEN and not self.is_id_type(entity_type) and value in text:
                 text = text.replace(value, token)
         return text
 
@@ -174,7 +180,7 @@ def mask_csv(text: str, column_types: dict, policy: dict, vault: Vault) -> tuple
     actions = {}
     for i, column in enumerate(header):
         entity_type = column_types.get(column)
-        if entity_type in ID_TYPES:
+        if vault.is_id_type(entity_type):
             actions[i] = ("token", entity_type)
         elif entity_type and policy.get(entity_type, "redact") != "allow":
             actions[i] = ("redact", entity_type)
