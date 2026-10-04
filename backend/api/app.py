@@ -411,10 +411,15 @@ def live_tests_catalog():
 @router.post("/tests/runs", tags=["tests"],
              summary="Uruchamia scenariusze (body: {ids}; brak = wszystkie) po kolei w tle; stan w GET /tests/runs/current")
 def start_live_tests(body: Optional[dict] = None):
-    if problem := _config_problem():
+    ids = (body or {}).get("ids")
+    try:
+        needs_key = live_runner.needs_live_model(ids)      # scenariusze mock działają bez klucza dostawcy
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, f"Błędny plik scenariuszy: {exc}")
+    if needs_key and (problem := _config_problem()):
         raise HTTPException(503, problem)
     try:
-        return live_runner.start_run((body or {}).get("ids"), on_turn=_log_test_turn)
+        return live_runner.start_run(ids, on_turn=_log_test_turn)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
     except ValueError as exc:

@@ -6,7 +6,8 @@ import { formatNumber, formatUsd } from '../format'
 import { useMeta } from '../meta'
 import Button from '../ui/Button'
 
-// Live tests: each scenario is a real chat turn through the security layer and the configured model.
+// Tests: each scenario is a chat turn through the security layer. Live scenarios use the configured model; mock
+// scenarios use a scripted model reply, and scenarios with variants run once per variant (e.g. a control on and off).
 // The backend runs them one by one in the background; this tab polls the run while it lasts.
 
 const POLL_MS = 1500
@@ -36,6 +37,10 @@ const LIMIT_LABELS = {
 
 const asList = (v) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
 
+// A scenario with variants runs once per variant: totals add them up.
+const sumOf = (result, key) =>
+  result.variants ? result.variants.reduce((sum, v) => sum + (v[key] ?? 0), 0) : (result[key] ?? 0)
+
 // The settings a scenario changes for its own turn, as short labels.
 function configLabels(config = {}, meta) {
   const filterLabel = (id) => meta.filters.find((f) => f.id === id)?.label ?? id
@@ -49,7 +54,7 @@ function configLabels(config = {}, meta) {
   ].filter(Boolean)
 }
 
-function Outcome({ outcome, stage }) {
+function Outcome({ outcome, stage, compact }) {
   const meta = useMeta()
   const o = OUTCOMES[outcome]
   if (!o) return <span className="text-grey">&ndash;</span>
@@ -57,17 +62,65 @@ function Outcome({ outcome, stage }) {
     <span className="inline-flex items-center gap-1.5">
       <span className={`size-1.5 shrink-0 rounded-full ${o.dot}`} />
       {o.label}
-      {stage && <span className="truncate text-grey">· {meta.controls[stage] ?? stage}</span>}
+      {stage && !compact && <span className="truncate text-grey">· {meta.controls[stage] ?? stage}</span>}
     </span>
   )
 }
 
-function Expected({ expect }) {
+// A scenario with variants shows each variant's outcome side by side: "Redacted / Allowed".
+function ResultCell({ result }) {
+  if (!result) return '–'
+  if (!result.variants) return <Outcome outcome={result.outcome ?? 'error'} stage={result.stage} />
+  return (
+    <span className="inline-flex items-center gap-2">
+      {result.variants.map((v, i) => (
+        <Fragment key={v.variant ?? i}>
+          {i > 0 && <span className="text-grey">/</span>}
+          <Outcome outcome={v.outcome ?? 'error'} compact />
+        </Fragment>
+      ))}
+    </span>
+  )
+}
+
+function Expected({ expect = {}, variants, fallback = {} }) {
   const meta = useMeta()
-  const outcomes = asList(expect.outcome).map((o) => OUTCOMES[o]?.label ?? o)
-  const stages = asList(expect.stage).map((s) => meta.controls[s] ?? s)
-  const parts = [outcomes.join(' or '), stages.length && `by ${stages.join(' or ')}`].filter(Boolean)
-  return <span>{parts.join(' ') || 'Checks only'}</span>
+  const describe = (e) => {
+    const outcomes = asList(e.outcome).map((o) => OUTCOMES[o]?.label ?? o)
+    const stages = asList(e.stage).map((s) => meta.controls[s] ?? s)
+    const parts = [outcomes.join(' or '), stages.length && `by ${stages.join(' or ')}`].filter(Boolean)
+    return parts.join(' ') || 'Checks only'
+  }
+  if (variants) return <span>{variants.map((v) => describe(v.expect ?? fallback)).join(' / ')}</span>
+  return <span>{describe(expect)}</span>
+}
+
+function Badge({ children, className, title }) {
+  return (
+    <span title={title} className={`shrink-0 rounded-sm px-1.5 text-xs ${className}`}>
+      {children}
+    </span>
+  )
+}
+
+// What the scripted model of a mock scenario says, step by step.
+function ScriptedModel({ script }) {
+  const text = (step) =>
+    step.reply ?? step.tool_calls.map((c) => `${c.name}(${JSON.stringify(c.args)})`).join(', ')
+  return (
+    <div className="space-y-1">
+      <p className="text-[13px] text-grey">
+        Scripted replies, no model is called. This shows what the layer does with this output, not how a model behaves.
+      </p>
+      <ol className="list-decimal space-y-0.5 pl-5 font-mono text-[12.5px]">
+        {script.map((step, i) => (
+          <li key={i} className="whitespace-pre-wrap break-words">
+            {text(step)}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
 }
 
 function Field({ label, children }) {
@@ -79,81 +132,147 @@ function Field({ label, children }) {
   )
 }
 
+function SettingBadges({ config, meta }) {
+  const labels = configLabels(config, meta)
+  if (labels.length === 0) return null
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {labels.map((l) => (
+        <span key={l} className="rounded-sm bg-violet/15 px-1.5 py-px text-[13px]">
+          {l}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// What came out of one turn: checks, what the model received, tool calls, the reply and the cost.
+function ResultFields({ scenario, result, onOpenLogs }) {
+  const meta = useMeta()
+  const modelGot = result.modelSaw ?? (result.maskedPrompt !== scenario.prompt ? result.maskedPrompt : '')
+  return (
+    <>
+      <Field label="Checks">
+        {result.checks.length === 0 && <span className="text-red-text">{result.error}</span>}
+        <ul className="space-y-0.5">
+          {result.checks.map((c, i) => (
+            <li key={i} className="flex items-baseline gap-2">
+              {c.ok ? (
+                <Check size={14} className="shrink-0 self-center text-green-text" />
+              ) : (
+                <X size={14} className="shrink-0 self-center text-red-text" />
+              )}
+              <span className="w-32 shrink-0">{c.name}</span>
+              <span className={c.ok ? 'text-grey' : 'text-red-text'}>{c.detail}</span>
+            </li>
+          ))}
+        </ul>
+      </Field>
+      {result.reason && <Field label="Reason">{result.reason}</Field>}
+      {modelGot && (
+        <Field label="Model got">
+          <span className="whitespace-pre-wrap break-words font-mono text-[12.5px]">{modelGot}</span>
+        </Field>
+      )}
+      {result.tools?.length > 0 && (
+        <Field label="Tool calls">
+          {result.tools.map((t, i) => (
+            <span key={i} className="mr-3 inline-flex items-center gap-1.5 font-mono text-[12.5px]">
+              <span className={`size-1.5 rounded-full ${t.allowed ? 'bg-green' : 'bg-red'}`} />
+              {t.tool}
+              {!t.allowed && <span className="font-sans text-grey">({meta.controls[t.stage] ?? t.stage})</span>}
+            </span>
+          ))}
+        </Field>
+      )}
+      <Field label="Reply">
+        <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-3 py-2 font-sans text-sm">
+          {result.reply || <span className="text-grey">(no reply shown to the user)</span>}
+        </pre>
+      </Field>
+      <Field label="Usage">
+        <span className="text-grey">
+          {result.mockModel ? 'scripted model · ' : `${result.modelCalls} model calls · `}
+          {formatNumber(result.tokens ?? 0)} tokens · {formatUsd(result.cost ?? 0)} · {formatNumber(result.latencyMs ?? 0)} ms
+        </span>
+      </Field>
+      {result.eventId && (
+        <div className="pt-1">
+          <Button size="sm" icon={ExternalLink} onClick={() => onOpenLogs({ query: `id:${result.eventId}` })}>
+            Open in log
+          </Button>
+        </div>
+      )}
+    </>
+  )
+}
+
+// One variant of a scenario (e.g. "Reply filter ON"): its settings, what is expected and what happened.
+function VariantCard({ scenario, variant, result, onOpenLogs }) {
+  const meta = useMeta()
+  const status = STATUS[result?.status ?? 'idle']
+  return (
+    <div className="min-w-0 rounded-md border border-line bg-white/60 px-3 py-2">
+      <div className="flex items-center gap-2 pb-1">
+        <status.icon size={16} className={status.className} />
+        <span className="font-semibold text-navy">{variant.label ?? variant.id}</span>
+        <span className="ml-auto text-[13px] text-grey">
+          <Expected expect={variant.expect ?? scenario.expect} />
+        </span>
+      </div>
+      <SettingBadges config={variant.config} meta={meta} />
+      {result ? (
+        <ResultFields scenario={scenario} result={result} onOpenLogs={onOpenLogs} />
+      ) : (
+        <p className="py-1 text-sm text-grey">Not run yet</p>
+      )}
+    </div>
+  )
+}
+
 function Details({ scenario, result, onOpenLogs }) {
   const meta = useMeta()
-  const labels = configLabels(scenario.config, meta)
   return (
     <div className="space-y-1 bg-page/60 px-10 py-3">
+      {scenario.standard && <Field label="Illustrates">{scenario.standard}</Field>}
+      {scenario.note && (
+        <Field label="Note">
+          <span className="text-grey">{scenario.note}</span>
+        </Field>
+      )}
       <Field label="Prompt">
         <span className="whitespace-pre-wrap">{scenario.prompt}</span>
       </Field>
-      {labels.length > 0 && (
-        <Field label="Settings">
-          <span className="flex flex-wrap gap-1.5">
-            {labels.map((l) => (
-              <span key={l} className="rounded-sm bg-violet/15 px-1.5 py-px text-[13px]">
-                {l}
-              </span>
-            ))}
-          </span>
+      {scenario.mode === 'mock' && (
+        <Field label="Model">
+          <ScriptedModel script={scenario.model} />
         </Field>
       )}
-      {!result ? (
-        <Field label="Result">
-          <span className="text-grey">Not run yet</span>
-        </Field>
+      {scenario.variants ? (
+        <div className="grid gap-3 pt-2 lg:grid-cols-2">
+          {scenario.variants.map((v) => (
+            <VariantCard
+              key={v.id}
+              scenario={scenario}
+              variant={v}
+              result={result?.variants?.find((r) => r.variant === v.id)}
+              onOpenLogs={onOpenLogs}
+            />
+          ))}
+        </div>
       ) : (
         <>
-          <Field label="Checks">
-            {result.checks.length === 0 && <span className="text-red-text">{result.error}</span>}
-            <ul className="space-y-0.5">
-              {result.checks.map((c, i) => (
-                <li key={i} className="flex items-baseline gap-2">
-                  {c.ok ? (
-                    <Check size={14} className="shrink-0 self-center text-green-text" />
-                  ) : (
-                    <X size={14} className="shrink-0 self-center text-red-text" />
-                  )}
-                  <span className="w-32 shrink-0">{c.name}</span>
-                  <span className={c.ok ? 'text-grey' : 'text-red-text'}>{c.detail}</span>
-                </li>
-              ))}
-            </ul>
-          </Field>
-          {result.reason && <Field label="Reason">{result.reason}</Field>}
-          {result.maskedPrompt && result.maskedPrompt !== scenario.prompt && (
-            <Field label="Model got">
-              <span className="font-mono text-[12.5px]">{result.maskedPrompt}</span>
+          {configLabels(scenario.config, meta).length > 0 && (
+            <Field label="Settings">
+              <SettingBadges config={scenario.config} meta={meta} />
             </Field>
           )}
-          {result.tools?.length > 0 && (
-            <Field label="Tool calls">
-              {result.tools.map((t, i) => (
-                <span key={i} className="mr-3 inline-flex items-center gap-1.5 font-mono text-[12.5px]">
-                  <span className={`size-1.5 rounded-full ${t.allowed ? 'bg-green' : 'bg-red'}`} />
-                  {t.tool}
-                  {!t.allowed && <span className="font-sans text-grey">({meta.controls[t.stage] ?? t.stage})</span>}
-                </span>
-              ))}
+          {result ? (
+            <ResultFields scenario={scenario} result={result} onOpenLogs={onOpenLogs} />
+          ) : (
+            <Field label="Result">
+              <span className="text-grey">Not run yet</span>
             </Field>
-          )}
-          <Field label="Reply">
-            <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-3 py-2 font-sans text-sm">
-              {result.reply || <span className="text-grey">(no reply shown to the user)</span>}
-            </pre>
-          </Field>
-          <Field label="Usage">
-            <span className="text-grey">
-              {result.modelCalls} model calls · {formatNumber(result.tokens)} tokens · {formatUsd(result.cost)} ·{' '}
-              {formatNumber(result.latencyMs)} ms
-            </span>
-          </Field>
-          {result.eventId && (
-            <div className="pt-1">
-              <Button size="sm" icon={ExternalLink} onClick={() => onOpenLogs({ query: `id:${result.eventId}` })}>
-                Open in log
-              </Button>
-            </div>
           )}
         </>
       )}
@@ -225,18 +344,20 @@ export default function Tests({ onOpenLogs }) {
   const done = Object.values(results)
   const passed = done.filter((r) => r.status === 'passed').length
   const failedIds = done.filter((r) => r.status !== 'passed').map((r) => r.id)
-  const cost = done.reduce((sum, r) => sum + (r.cost ?? 0), 0)
-  const tokens = done.reduce((sum, r) => sum + (r.tokens ?? 0), 0)
+  const cost = done.reduce((sum, r) => sum + sumOf(r, 'cost'), 0)
+  const tokens = done.reduce((sum, r) => sum + sumOf(r, 'tokens'), 0)
 
   return (
     <div className="h-full overflow-auto">
       <div className="space-y-5 px-6 pb-8 pt-5">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <div className="min-w-0 flex-1">
-            <h2 className="font-semibold text-navy">Live tests</h2>
+            <h2 className="font-semibold text-navy">Tests</h2>
             <p className="text-sm text-grey">
-              Each test is a real chat turn through the security layer and the model ({catalog.model}). Settings a test
-              changes apply to its own turn only and are restored after it. Test turns appear in the log.
+              Each test is a chat turn through the security layer. Live tests use the real model ({catalog.model}); tests
+              marked mock use a scripted model reply, cost nothing and need no key. Tests with variants run once per variant
+              (for example a control on and off) and show the results side by side. Settings a test changes apply to its own
+              turn only. Test turns appear in the log.
             </p>
           </div>
           {run && (
@@ -309,18 +430,28 @@ export default function Tests({ onOpenLogs }) {
                                 className={`shrink-0 text-grey transition-transform ${isOpen ? 'rotate-90' : ''}`}
                               />
                               <span className="truncate">{s.title}</span>
-                              {s.config && <span className="shrink-0 rounded-sm bg-violet/15 px-1.5 text-xs">settings</span>}
+                              {s.mode === 'mock' && (
+                                <Badge className="bg-amber/20 text-amber-text" title="Scripted model reply: no model is called">
+                                  mock
+                                </Badge>
+                              )}
+                              {s.variants && (
+                                <Badge className="bg-blue-light text-ink" title="Run once per variant, shown side by side">
+                                  {s.variants.length} variants
+                                </Badge>
+                              )}
+                              {s.config && <Badge className="bg-violet/15">settings</Badge>}
                             </span>
                           </td>
                           <td className={`${TD} truncate`}>{s.roleLabel}</td>
                           <td className={`${TD} truncate text-grey`}>
-                            <Expected expect={s.expect} />
+                            <Expected expect={s.expect} variants={s.variants} fallback={s.expect} />
                           </td>
                           <td className={`${TD} truncate`}>
-                            {result ? <Outcome outcome={result.outcome ?? 'error'} stage={result.stage} /> : '–'}
+                            <ResultCell result={result} />
                           </td>
                           <td className={`${TD} text-right tabular-nums text-grey`}>
-                            {result ? `${(result.latencyMs / 1000).toFixed(1)} s` : ''}
+                            {result ? `${(sumOf(result, 'latencyMs') / 1000).toFixed(1)} s` : ''}
                           </td>
                           <td className={`${TD} pr-4 text-right`}>
                             <button

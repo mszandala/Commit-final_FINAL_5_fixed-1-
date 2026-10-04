@@ -25,15 +25,20 @@ def test_catalog_is_valid():
     ids = [s["id"] for s in catalog["scenarios"]]
     assert len(ids) == len(set(ids))
     for s in catalog["scenarios"]:
-        assert s["group"] in groups and s["prompt"] and s["expect"], s["id"]
-        outcome = s["expect"].get("outcome", [])
-        assert set(outcome if isinstance(outcome, list) else [outcome]) <= set(runner.OUTCOMES), s["id"]
-        config = s.get("config", {})
-        assert set(config) <= {"guardMode", "maskPii", "filters", "roles", "limits"}, s["id"]
-        assert set(config.get("filters", {})) <= set(SETTINGS.filters), s["id"]
-        assert set(config.get("limits", {})) <= set(runner.LIMITS), s["id"]
-        for areas in config.get("roles", {}).values():
-            assert set(areas) <= set(DATA_ACCESS), s["id"]
+        # Scenariusz z wariantami może mieć oczekiwania w wariantach (wariant bez własnych bierze ogólne).
+        variants = s.get("variants") or []
+        expects = [v.get("expect", s.get("expect")) for v in variants] or [s.get("expect")]
+        configs = [s.get("config", {})] + [v.get("config", {}) for v in variants]
+        assert s["group"] in groups and s["prompt"] and all(expects), s["id"]
+        for expect in expects:
+            outcome = expect.get("outcome", [])
+            assert set(outcome if isinstance(outcome, list) else [outcome]) <= set(runner.OUTCOMES), s["id"]
+        for config in configs:
+            assert set(config) <= {"guardMode", "maskPii", "filters", "roles", "limits", "policy"}, s["id"]
+            assert set(config.get("filters", {})) <= set(SETTINGS.filters), s["id"]
+            assert set(config.get("limits", {})) <= set(runner.LIMITS), s["id"]
+            for areas in config.get("roles", {}).values():
+                assert set(areas) <= set(DATA_ACCESS), s["id"]
 
 
 @pytest.mark.parametrize("result, outcome", [

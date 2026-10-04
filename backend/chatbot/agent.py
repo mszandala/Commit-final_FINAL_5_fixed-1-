@@ -33,12 +33,13 @@ def new_history() -> list:
 
 
 def run_agent(user_message: str, history: Optional[list] = None,
-    tool_gate: Optional[ToolGate] = None, max_depth: int = 0) -> tuple[str, list]:
+    tool_gate: Optional[ToolGate] = None, max_depth: int = 0, chat: Optional[Callable] = None) -> tuple[str, list]:
     """Odpowiada na jedną wiadomość użytkownika.
 
     Zwraca (odpowiedź, nowa historia). Przekazana historia nie jest modyfikowana,
     więc przy błędzie lub blokadzie wywołujący zostaje ze stanem sprzed wiadomości.
     """
+    chat = chat or llm_client.chat      # scenariusze z atrapą modelu podają własną funkcję
     messages = list(history) if history else new_history()
     messages.append({"role": "user", "content": user_message})
 
@@ -46,7 +47,7 @@ def run_agent(user_message: str, history: Optional[list] = None,
     max_depth_token = _max_agent_depth.set(max_depth)
     try:
         for step in range(MAX_TOOL_STEPS):
-            msg = llm_client.chat(messages, tools=TOOLS)
+            msg = chat(messages, tools=TOOLS)
 
             if not msg.tool_calls:
                 messages.append({"role": "assistant", "content": msg.content})
@@ -70,7 +71,7 @@ def run_agent(user_message: str, history: Optional[list] = None,
             "role": "user",
             "content": "Please give your final answer now.",
         })
-        msg = llm_client.chat(messages)
+        msg = chat(messages)
         messages.append({"role": "assistant", "content": msg.content})
         return msg.content, messages
 

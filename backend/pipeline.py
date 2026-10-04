@@ -153,10 +153,10 @@ def _security_zone_classifier(text: str, categories: dict, policy) -> dict:
     return security_zone_classifier(text, categories, policy)
 
 
-def policy_engine() -> Optional[CompanyPolicyEngine]:
-    """Silnik regulaminów firmowych albo None, gdy moduł jest wyłączony w konfiguracji."""
+def policy_engine(policy: Optional[Policy] = None) -> Optional[CompanyPolicyEngine]:
+    """Silnik regulaminów firmowych albo None, gdy moduł jest wyłączony (w podanej polityce albo w konfiguracji)."""
     global _policy_engine
-    if not filter_on("company_policies"):
+    if not (policy.filter_on("company_policies") if policy is not None else filter_on("company_policies")):
         return None
     if _policy_engine is None:
         _policy_engine = (CompanyPolicyEngine(classifier=_security_zone_classifier)
@@ -305,19 +305,22 @@ def _count_leaks(history: list, vault: Vault) -> int:
 
 
 def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] = None,
-             on_progress: Optional[Progress] = None, limits: Optional[dict] = None) -> TurnResult:
+             on_progress: Optional[Progress] = None, limits: Optional[dict] = None,
+             policy: Optional[Policy] = None, chat: Optional[Callable] = None) -> TurnResult:
     """Przeprowadza jedną wiadomość użytkownika przez całą warstwę bezpieczeństwa.
 
     `on_progress(rodzaj, dane)` dostaje kolejne etapy ("stage") i wywołania narzędzi ("tool").
     `limits` to pozostały budżet roli: {"tokens", "cost"}; zawęża limity jednej tury.
+    `policy` zastępuje politykę z żywej konfiguracji tylko dla tej tury (scenariusze ON/OFF bez zmiany globalnego
+    stanu serwera); `chat` zastępuje wywołanie modelu chatbota (scenariusze z atrapą modelu).
     """
     started = time.perf_counter()
     events = audit.start_turn()
     conv.turns += 1
-    policy = current_policy()
+    policy = policy or current_policy()
     if threshold is None:
         threshold = policy.controls.pii.threshold
-    ctx = TurnContext(conv, policy, _detect, policy_engine, threshold)
+    ctx = TurnContext(conv, policy, _detect, lambda: policy_engine(policy), threshold)
     gate = SecureToolGate(ctx, on_progress, events, limits)
     guard, flagged, guard_reason = None, False, None
     output = {"entities": [], "restored": [], "redacted": [], "blocked": [], "exempt": [], "found": []}
@@ -372,7 +375,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     # Prompt systemowy chatbota zostaje nietknięty; informacje od warstwy idą w pierwszej wiadomości.
     sent = masked_prompt if conv.history else _notice(conv.role, policy) + masked_prompt
     try:
-        raw_reply, new_history = agent.run_agent(sent, history=conv.history, tool_gate=gate)
+        raw_reply, new_history = agent.run_agent(sent, history=conv.history, tool_gate=gate, chat=chat)
     except agent.ResponseBlocked as exc:
         return finish(f"Odpowiedź została zablokowana: {exc}",
                       {"decision": "block", "stage": "tool_whitelist", "reason": str(exc)},
@@ -385,7 +388,7 @@ def run_turn(conv: Conversation, user_message: str, threshold: Optional[float] =
     if _RAW_TOOL_CALL.search(raw_reply or ""):
         audit.record("retry", "chatbot", reason="tool call written as text")
         try:
-            raw_reply, new_history = agent.run_agent(_RETRY_MESSAGE, history=new_history, tool_gate=gate)
+            raw_reply, new_history = agent.run_agent(_RETRY_MESSAGE, history=new_history, tool_gate=gate, chat=chat)
         except Exception as exc:
             audit.record("error", "chatbot", error=type(exc).__name__)
             return finish(f"Błąd wykonania modelu: {exc}", None, masked_prompt, entities, error=str(exc))
